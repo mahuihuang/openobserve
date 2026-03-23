@@ -15,28 +15,32 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <!--
-ClickableWords Component
-========================
-Tokenizes a string field value into individual words. Each word shows an underline
-on hover and displays a dropdown menu on click with options to:
-- Copy the word
-- Filter (include) using str_match
-- Exclude using str_match
+ClickableWords Component (Lazy Activation)
+===========================================
+Renders plain text by default. On click, tokenizes the string into individual
+words with a dropdown menu for copy / include / exclude via str_match.
+Deactivates back to plain text when clicking outside.
 -->
 <template>
-  <span class="clickable-words logs-highlight-json">
+  <!-- Inactive: plain text, single DOM node -->
+  <span
+    v-if="!activated"
+    class="clickable-words-plain log-string"
+    @click.stop="activate"
+  >{{ value }}</span>
+
+  <!-- Active: tokenized words -->
+  <span v-else ref="rootRef" class="clickable-words logs-highlight-json">
     <template v-for="(token, idx) in tokens" :key="idx">
       <span
         v-if="token.isWord"
         class="clickable-word log-string"
         :class="{ 'clickable-word--active': activeIndex === idx }"
-        :ref="(el) => setWordRef(idx, el)"
         @click.stop="onWordClick($event, idx, token.text)"
       >{{ token.text }}</span>
       <span v-else class="log-string">{{ token.text }}</span>
     </template>
 
-    <!-- Dropdown menu -->
     <q-menu
       v-model="showMenu"
       :target="menuTarget"
@@ -74,7 +78,7 @@ on hover and displays a dropdown menu on click with options to:
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard, useQuasar } from "quasar";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
@@ -97,20 +101,36 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const $q = useQuasar();
 
+// Lazy activation state
+const activated = ref(false);
+const rootRef = ref<HTMLElement | null>(null);
+
 const showMenu = ref(false);
 const menuTarget = ref<HTMLElement | null>(null);
 const activeIndex = ref<number | null>(null);
 const selectedWord = ref("");
-const wordRefs = ref<Record<number, HTMLElement | null>>({});
 
-const setWordRef = (idx: number, el: any) => {
-  wordRefs.value[idx] = el as HTMLElement;
+const activate = () => {
+  activated.value = true;
 };
 
-/**
- * Tokenize the value string into word and non-word segments.
- * Words are sequences of alphanumeric/underscore/hyphen/dot characters.
- */
+const deactivate = (e: MouseEvent) => {
+  if (!activated.value) return;
+  // Don't deactivate if clicking inside the component or menu
+  if (rootRef.value?.contains(e.target as Node)) return;
+  if (showMenu.value) return;
+  activated.value = false;
+  activeIndex.value = null;
+};
+
+onMounted(() => {
+  document.addEventListener("click", deactivate, true);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("click", deactivate, true);
+});
+
 const tokens = computed(() => {
   const text = String(props.value);
   const result: { text: string; isWord: boolean }[] = [];
@@ -157,6 +177,13 @@ const onExclude = () => {
 
 <style scoped lang="scss">
 @import "@/assets/styles/log-highlighting.css";
+
+.clickable-words-plain {
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-word;
+}
 
 .clickable-words {
   display: inline;
