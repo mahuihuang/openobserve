@@ -292,10 +292,23 @@ size="lg" color="primary" />
           :class="store.state.theme === 'dark' ? 'dark' : ''"
         >
           <LogsHighLighting
+            v-if="typeof value[key] !== 'string'"
             :data="{ [key]: value[key] }"
             :show-braces="false"
             :query-string="highlightQuery"
-          /><span v-if="index < Object.keys(value).length - 1">,</span>
+          />
+          <template v-else>
+            <span class="logs-highlight-json">
+              <span class="log-key">{{ key }}</span><span class="log-separator">: </span>
+            </span>
+            <ClickableWords
+              :value="value[key]"
+              :field-name="key"
+              :query-string="highlightQuery"
+              @word-action="handleWordAction"
+            />
+          </template>
+          <span v-if="index < Object.keys(value).length - 1">,</span>
         </span>
       </div>
       }
@@ -405,6 +418,7 @@ import { defineAsyncComponent } from "vue";
 import { useQuasar } from "quasar";
 import config from "@/aws-exports";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import { searchState } from "@/composables/useLogs/searchState";
 import { useServiceCorrelation } from "@/composables/useServiceCorrelation";
 
@@ -444,6 +458,7 @@ export default {
     EqualIcon,
     AppTabs,
     LogsHighLighting,
+    ClickableWords,
     CodeQueryEditor: defineAsyncComponent(
       () => import("@/components/CodeQueryEditor.vue"),
     ),
@@ -517,6 +532,20 @@ export default {
     ) => {
       emit("addSearchTerm", field, field_value, action);
     };
+
+    const handleWordAction = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      // Build str_match expression for the clicked word
+      const strMatchExpr =
+        action === "include"
+          ? `str_match(${field}, '${word}')`
+          : `NOT str_match(${field}, '${word}')`;
+      searchObj.data.stream.addToFilter = strMatchExpr;
+    };
+
     const addFieldToTable = (value: string) => {
       emit("addFieldToTable", value);
     };
@@ -929,6 +958,7 @@ export default {
       typeOfRegexPattern,
       regexPatternType,
       confirmRegexPatternType,
+      handleWordAction,
     };
   },
 };
