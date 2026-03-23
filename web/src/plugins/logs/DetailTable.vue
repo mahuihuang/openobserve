@@ -294,7 +294,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                         ? 'tw:whitespace-nowrap'
                         : 'tw:whitespace-pre-wrap'
                     "
-                  ><LogsHighLighting :data="props.row.value" :show-braces="false" :query-string="highlightQuery" :disable-truncation="true" /></pre>
+                  ><LogsHighLighting v-if="typeof props.row.value !== 'string'" :data="props.row.value" :show-braces="false" :query-string="highlightQuery" :disable-truncation="true" /><ClickableWords v-else :value="props.row.value" :field-name="props.row.field" :query-string="highlightQuery" @word-action="handleWordAction" /></pre>
                 </div>
               </q-td>
             </template>
@@ -481,6 +481,7 @@ import { copyToClipboard, useQuasar } from "quasar";
 import JsonPreview from "./JsonPreview.vue";
 import O2AIContextAddBtn from "@/components/common/O2AIContextAddBtn.vue";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import { extractStatusFromLog } from "@/utils/logs/statusParser";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { searchState } from "@/composables/useLogs/searchState";
@@ -496,7 +497,7 @@ const defaultValue: any = () => {
 
 export default defineComponent({
   name: "SearchDetail",
-  components: { EqualIcon, NotEqualIcon, JsonPreview, O2AIContextAddBtn, LogsHighLighting, TelemetryCorrelationDashboard, CorrelatedLogsTable },
+  components: { EqualIcon, NotEqualIcon, JsonPreview, O2AIContextAddBtn, LogsHighLighting, ClickableWords, TelemetryCorrelationDashboard, CorrelatedLogsTable },
   emits: [
     "showPrevDetail",
     "showNextDetail",
@@ -763,6 +764,18 @@ export default defineComponent({
       emit("show-correlation", props.modelValue);
     };
 
+    const handleWordAction = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      const strMatchExpr =
+        action === "include"
+          ? `str_match(${field}, '${word}')`
+          : `NOT str_match(${field}, '${word}')`;
+      searchObj.data.stream.addToFilter = strMatchExpr;
+    };
+
     return {
       t,
       store,
@@ -785,6 +798,7 @@ export default defineComponent({
       addSearchTerm,
       closeTable,
       showCorrelation,
+      handleWordAction,
       statusColor,
       tableColumns,
       tableRows,
