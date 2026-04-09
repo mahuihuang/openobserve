@@ -4849,6 +4849,11 @@ export default defineComponent({
           if (this.queryEditorRef?.setValue)
             this.queryEditorRef.setValue(this.searchObj.data.query);
         }
+
+        // Auto-trigger query after filter is applied
+        this.$nextTick(() => {
+          this.handleRunQueryFn();
+        });
       }
     },
     toggleTransformEditor(newVal) {

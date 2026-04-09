@@ -301,11 +301,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                       :query-string="highlightQuery"
                       :simple-mode="false"
                     /><LogsHighLighting
-                      v-else
+                      v-else-if="typeof props.row.value !== 'string'"
                       :data="props.row.value"
                       :show-braces="false"
                       :query-string="highlightQuery"
-                    /></pre>
+                    /><ClickableWords v-else :value="props.row.value" :field-name="props.row.field" :query-string="highlightQuery" @word-action="handleWordAction" /></pre>
                 </div>
               </q-td>
             </template>
@@ -493,6 +493,7 @@ import { copyToClipboard, useQuasar } from "quasar";
 import JsonPreview from "./JsonPreview.vue";
 import O2AIContextAddBtn from "@/components/common/O2AIContextAddBtn.vue";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { extractStatusFromLog } from "@/utils/logs/statusParser";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
@@ -509,7 +510,7 @@ const defaultValue: any = () => {
 
 export default defineComponent({
   name: "SearchDetail",
-  components: { EqualIcon, NotEqualIcon, JsonPreview, O2AIContextAddBtn, LogsHighLighting, ChunkedContent, TelemetryCorrelationDashboard, CorrelatedLogsTable },
+  components: { EqualIcon, NotEqualIcon, JsonPreview, O2AIContextAddBtn, LogsHighLighting, ClickableWords, ChunkedContent, TelemetryCorrelationDashboard, CorrelatedLogsTable },
   emits: [
     "showPrevDetail",
     "showNextDetail",
@@ -776,6 +777,18 @@ export default defineComponent({
       emit("show-correlation", props.modelValue);
     };
 
+    const handleWordAction = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      const strMatchExpr =
+        action === "include"
+          ? `str_match(${field}, '${word}')`
+          : `NOT str_match(${field}, '${word}')`;
+      searchObj.data.stream.addToFilter = strMatchExpr;
+    };
+
     const getContentSize = (data: any): number => {
       if (data === null || data === undefined) return 0;
       if (typeof data === "string") return data.length;
@@ -811,6 +824,7 @@ export default defineComponent({
       addSearchTerm,
       closeTable,
       showCorrelation,
+      handleWordAction,
       statusColor,
       tableColumns,
       tableRows,
