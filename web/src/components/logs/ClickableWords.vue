@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
 const tokens = computed(() => {
   const text = String(props.value);
   const result: { text: string; isWord: boolean }[] = [];
-  const regex = /([a-zA-Z0-9_\-\.]+)|([^a-zA-Z0-9_\-\.]+)/g;
+  const regex = /([\p{L}\p{N}_\-\.]+)|([^\p{L}\p{N}_\-\.]+)/gu;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
     if (match[1]) {
