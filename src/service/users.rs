@@ -67,8 +67,6 @@ pub async fn post_user(
     let cfg = get_config();
     usr_req.email = usr_req.email.to_lowercase();
     if usr_req.role.custom_role.is_some() {
-        #[cfg(not(feature = "enterprise"))]
-        return Ok(MetaHttpResponse::bad_request("Custom roles not allowed"));
         #[cfg(feature = "enterprise")]
         if !get_openfga_config().enabled {
             return Ok(MetaHttpResponse::bad_request("Custom roles not allowed"));
@@ -224,7 +222,6 @@ pub async fn update_user(
     }
     let is_email_root = is_root_user(email);
 
-    #[cfg(not(feature = "enterprise"))]
     if is_email_root {
         user.role = Some(crate::common::meta::user::UserRoleRequest {
             role: UserRole::Root.to_string(),

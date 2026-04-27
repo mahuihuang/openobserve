@@ -188,10 +188,6 @@ pub async fn save(
             .unwrap();
     }
 
-    #[cfg(not(feature = "enterprise"))]
-    {
-        user.role.base_role = UserRole::Admin;
-    }
     match users::post_user(&org_id, user, &initiator_id).await {
         Ok(resp) => resp,
         Err(e) => MetaHttpResponse::internal_error(e),
@@ -232,8 +228,7 @@ pub async fn update(
     axum::Json(user): axum::Json<UpdateUser>,
 ) -> Response {
     let email_id = email_id.trim().to_lowercase();
-    #[cfg(not(feature = "enterprise"))]
-    let mut user = user;
+    let user = user;
     if user.eq(&UpdateUser::default()) {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -264,13 +259,6 @@ pub async fn update(
                 .unwrap(),
             ))
             .unwrap();
-    }
-    #[cfg(not(feature = "enterprise"))]
-    {
-        user.role = Some(UserRoleRequest {
-            role: UserRole::Admin.to_string(),
-            custom: None,
-        });
     }
     let initiator_id = &user_email.user_id;
     let update_mode = if user_email.user_id.eq(&email_id) {
@@ -955,10 +943,6 @@ fn check_role_available(role: &UserRole) -> Option<RolesResponse> {
     if role.eq(&UserRole::Root) || role.eq(&UserRole::ServiceAccount) {
         None
     } else {
-        #[cfg(feature = "enterprise")]
-        if !get_openfga_config().enabled && role.ne(&UserRole::Admin) {
-            return None;
-        }
         Some(RolesResponse {
             label: role.get_label(),
             value: role.to_string(),
