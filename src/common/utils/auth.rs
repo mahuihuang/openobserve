@@ -1210,8 +1210,28 @@ where
             };
 
             // Ingestion endpoints are always allowed (token-based auth)
-            let bypass_check = url_len > 0
-                && INGESTION_EP.contains(&path_columns[url_len - 1]);
+            // Search/query endpoints should also bypass permission checks so that
+            // read-only users (Viewer) can query logs via POST endpoints.
+            let bypass_check = (url_len > 0
+                && INGESTION_EP.contains(&path_columns[url_len - 1]))
+                || (method.eq("POST")
+                    && url_len > 1
+                    && (path_columns[1].starts_with("_search")
+                        || path_columns[1].starts_with("result_schema")))
+                || path.contains("/prometheus/api/v1/query")
+                || path.contains("/prometheus/api/v1/series")
+                || path.contains("/prometheus/api/v1/metadata")
+                || path.contains("/prometheus/api/v1/labels")
+                || path.contains("/prometheus/api/v1/label/")
+                || path.contains("/traces/latest")
+                || path.contains("/traces/session")
+                || path.contains("/traces/user")
+                || (path.contains("/traces/") && path.ends_with("/dag"))
+                || path.contains("/_values_stream")
+                || path.contains("/_around")
+                || path.contains("/format_query")
+                || path.contains("/resources")
+                || path.contains("query_manager");
 
             return Ok(AuthExtractor {
                 auth: auth_str.to_owned(),
