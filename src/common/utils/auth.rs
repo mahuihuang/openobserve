@@ -1224,7 +1224,8 @@ where
                 || path.contains("/_around")
                 || path.contains("/format_query")
                 || path.contains("/resources")
-                || path.contains("query_manager");
+                || path.contains("query_manager")
+                || path.contains("/short");
 
             return Ok(AuthExtractor {
                 auth: auth_str.to_owned(),
