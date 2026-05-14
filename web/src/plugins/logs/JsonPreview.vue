@@ -129,7 +129,7 @@
         />
       </div>
     </div>
-    <div v-show="activeTab !== 'unflattened'" class="q-pl-md">
+    <div v-show="activeTab !== 'unflattened'" class="q-pl-md tw:overflow-hidden">
       {
       <div
         class="log_json_content"
