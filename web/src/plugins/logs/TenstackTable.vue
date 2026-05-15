@@ -632,6 +632,27 @@ watch(
   },
 );
 
+// Watch expandedRows prop so that external changes (e.g. "expand all" in raw mode)
+// are reflected in the table.
+watch(
+  () => props.expandedRows,
+  async (newVal, oldVal) => {
+    // Skip if the reference is the same (no real change)
+    if (newVal === oldVal) return;
+
+    // Reset to base rows and re-apply expanded rows from scratch
+    tableRows.value = [...props.rows];
+    expandedRowIndices.value.clear();
+    expandedRowHeights.value = {};
+    actualIndexCache.value.clear();
+
+    setExpandedRows();
+
+    await nextTick();
+  },
+  { deep: true },
+);
+
 // watch(
 //   () => props.highlightQuery,
 //   async (newVal, oldVal) => {
@@ -858,15 +879,46 @@ const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems());
 const totalSize = computed(() => rowVirtualizer.value.getTotalSize());
 
 const setExpandedRows = () => {
-  props.expandedRows.forEach((index: any) => {
-    const virtualIndex = calculateVirtualIndex(index);
-    if (index < props.rows.length) {
-      expandRow(virtualIndex as number);
+  if (!props.expandedRows.length) return;
+
+  // Batch expand: build the expanded tableRows and expandedRowIndices in one pass.
+  // This avoids the async race condition of calling expandRow() in a loop.
+  // We sort the indices and insert expanded rows from bottom to top to keep indices stable,
+  // or rebuild from scratch.
+
+  const indicesToExpand = [...props.expandedRows]
+    .filter((index: any) => index < props.rows.length)
+    .sort((a: any, b: any) => a - b);
+
+  if (!indicesToExpand.length) return;
+
+  // Rebuild tableRows with expanded rows interleaved
+  const newTableRows: any[] = [];
+  const newExpandedIndices = new Set<number>();
+  let expandedCount = 0;
+  const expandSet = new Set(indicesToExpand);
+
+  for (let i = 0; i < props.rows.length; i++) {
+    const virtualIndex = i + expandedCount;
+    newTableRows.push(props.rows[i]);
+
+    if (expandSet.has(i)) {
+      // Insert expanded row right after
+      newTableRows.push({
+        isExpandedRow: true,
+        ...(props.rows[i] as {}),
+      });
+      newExpandedIndices.add(virtualIndex);
+      expandedCount++;
     }
-  });
-  // Clear the actual index cache since expanded rows are changing
+  }
+
+  tableRows.value = newTableRows;
+  expandedRowIndices.value = newExpandedIndices;
+  expandedRowHeights.value = {};
   actualIndexCache.value.clear();
 };
+
 
 const copyLogToClipboard = (value: any, copyAsJson: boolean = true) => {
   emits("copy", value, copyAsJson);

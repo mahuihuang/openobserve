@@ -198,6 +198,9 @@
     "toggleFunctionLabel": "Function",
     "labelWrap": "Wrap Content",
     "messageWrapContent": "Wrap Table Content",
+    "wrapDisabledInRawView": "Disabled in raw log view",
+    "tableView": "Table View",
+    "rawLogView": "Raw Logs",
     "showHideColumns": "Toggle Columns",
     "functionPlaceholder": "Saved Functions",
     "functionMessage": "Press Tab or Enter to apply a new function name.",
@@ -2569,7 +2572,7 @@
       "refreshTemplates": "Refresh latest Templates"
     },
     "editJson": "Edit Alert JSON",
-    "additional_settings":"Additional Settings",
+    "additional_settings": "Additional Settings",
     "alertNamePlaceholder": "Alert name",
     "anomalyNamePlaceholder": "Anomaly name",
     "folder": "Folder",
