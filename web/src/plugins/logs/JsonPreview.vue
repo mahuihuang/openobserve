@@ -129,7 +129,7 @@
         />
       </div>
     </div>
-    <div v-show="activeTab !== 'unflattened'" class="q-pl-md">
+    <div v-show="activeTab !== 'unflattened'" class="q-pl-md tw:overflow-hidden">
       {
       <div
         class="log_json_content"
@@ -317,20 +317,24 @@
           :data-test="`log-expand-detail-key-${key}`"
           :class="store.state.theme === 'dark' ? 'dark' : ''"
         >
-          <span class="log-key">{{ key }}</span
-          ><span class="log-separator">: </span
-          ><span
-            ><ChunkedContent
-              v-if="getContentSize(value[key]) > 50000"
-              :data="value[key]"
-              :field-key="`json_preview_${key}`"
-              :query-string="highlightQuery"
-              :simple-mode="false" /><LogsHighLighting
-              v-else
-              :data="value[key]"
-              :show-braces="false"
-              :query-string="highlightQuery" /></span
-          ><span v-if="index < Object.keys(value).length - 1">,</span>
+          <span class="log-key">"{{ key }}"</span><span class="log-separator">: </span><ChunkedContent
+            v-if="getContentSize(value[key]) > 50000"
+            :data="value[key]"
+            :field-key="`json_preview_${key}`"
+            :query-string="highlightQuery"
+            :simple-mode="false"
+          /><LogsHighLighting
+            v-else-if="typeof value[key] !== 'string'"
+            :data="value[key]"
+            :show-braces="false"
+            :query-string="highlightQuery"
+          /><ClickableWords
+            v-else
+            :value="value[key]"
+            :field-name="key"
+            :query-string="highlightQuery"
+            @word-action="handleWordAction"
+          /><span v-if="index < Object.keys(value).length - 1">,</span>
         </span>
       </div>
       }
@@ -439,6 +443,7 @@ import { defineAsyncComponent } from "vue";
 import { useQuasar } from "quasar";
 import config from "@/aws-exports";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { searchState } from "@/composables/useLogs/searchState";
 import { useServiceCorrelation } from "@/composables/useServiceCorrelation";
@@ -487,6 +492,7 @@ export default {
     EqualIcon,
     AppTabs,
     LogsHighLighting,
+    ClickableWords,
     ChunkedContent,
     CodeQueryEditor: defineAsyncComponent(
       () => import("@/components/CodeQueryEditor.vue"),
@@ -561,6 +567,20 @@ export default {
     ) => {
       emit("addSearchTerm", field, field_value, action);
     };
+
+    const handleWordAction = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      // Build str_match expression for the clicked word
+      const strMatchExpr =
+        action === "include"
+          ? `str_match(${field}, '${word}')`
+          : `NOT str_match(${field}, '${word}')`;
+      searchObj.data.stream.addToFilter = strMatchExpr;
+    };
+
     const addFieldToTable = (value: string) => {
       emit("addFieldToTable", value);
     };
@@ -1103,6 +1123,7 @@ export default {
       typeOfRegexPattern,
       regexPatternType,
       confirmRegexPatternType,
+      handleWordAction,
       getContentSize,
       getCrossLinksForField,
       openCrossLink,
