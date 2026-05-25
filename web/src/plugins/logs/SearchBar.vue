@@ -1477,7 +1477,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 @update:query="updateQueryValue"
                 @update:nlp-mode="(val) => (searchObj.meta.nlpMode = val)"
                 @run-query="handleRunQueryFn"
-                @keydown="handleKeyDown"
                 @focus="searchObj.meta.queryEditorPlaceholderFlag = false"
                 @blur="searchObj.meta.queryEditorPlaceholderFlag = true"
               />
@@ -1519,11 +1518,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                           ? 'empty-function'
                           : ''
                       "
-                      @update:query="
-                        searchObj.data.tempFunctionContent = $event
-                      "
-                      @update:nlp-mode="(val) => (vrlEditorNlpMode = val)"
-                      @keydown="handleKeyDown"
+                      @update:query="searchObj.data.tempFunctionContent = $event"
+                      @update:nlp-mode="(val) => vrlEditorNlpMode = val"
+                      @run-query="handleRunQueryFn"
                       @focus="
                         searchObj.meta.functionEditorPlaceholderFlag = false
                       "
@@ -2619,11 +2616,6 @@ export default defineComponent({
             timeout: 2000,
           });
         });
-    },
-    handleKeyDown(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        this.handleRunQueryFn();
-      }
     },
   },
   props: {
@@ -5659,6 +5651,11 @@ export default defineComponent({
             this.$emit("searchdata");
           }
         }
+
+        // Auto-trigger query after filter is applied
+        this.$nextTick(() => {
+          this.handleRunQueryFn();
+        });
       }
     },
     removeFieldTerm(fieldName: string) {

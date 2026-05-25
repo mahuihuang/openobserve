@@ -231,17 +231,29 @@ class="q-mr-xs" />
                 store.state.zoConfig.timestamp_column || '_timestamp'
               ]
             }`"
-            :style="{
-              transform: `translateY(${virtualRow.start + (isFirefox ? baseOffset : 0)}px)`,
-              minWidth: '100%',
-            }"
+            :style="
+              (formattedRows[virtualRow.index]?.original as any)?.isExpandedRow
+                ? {
+                    transform: `translateY(${virtualRow.start + (isFirefox ? baseOffset : 0)}px)`,
+                    width: expandedRowWidth ? expandedRowWidth + 'px' : '100%',
+                    maxWidth: expandedRowWidth ? expandedRowWidth + 'px' : '100%',
+                    left: '0',
+                  }
+                : {
+                    transform: `translateY(${virtualRow.start + (isFirefox ? baseOffset : 0)}px)`,
+                    minWidth: '100%',
+                  }
+            "
             :data-index="virtualRow.index"
             :data-expanded="
               formattedRows?.[virtualRow.index]?.original?.isExpandedRow
             "
             :ref="(node: any) => node && rowVirtualizer.measureElement(node)"
-            class="tw:absolute tw:flex tw:w-max tw:items-center tw:justify-start tw:border-b-[1px] tw:cursor-pointer hover:tw:bg-[var(--o2-hover-gray)]"
+            class="tw:absolute tw:flex tw:items-center tw:justify-start tw:border-b-[1px] tw:cursor-pointer hover:tw:bg-[var(--o2-hover-gray)]"
             :class="[
+              (formattedRows[virtualRow.index]?.original as any)?.isExpandedRow
+                ? 'tw:w-full'
+                : 'tw:w-max',
               defaultColumns &&
               !wrap &&
               !(formattedRows[virtualRow.index]?.original as any)?.isExpandedRow
@@ -281,7 +293,7 @@ class="q-mr-xs" />
               "
               :colspan="columnOrder.length"
               :data-test="`log-search-result-expanded-row-${virtualRow.index}`"
-              class="tw:w-full tw:relative"
+              class="tw:w-full tw:relative tw:min-w-0 tw:overflow-hidden"
             >
               <json-preview
                 :value="tableRows[virtualRow.index - 1] as any"
@@ -633,6 +645,27 @@ watch(
   },
 );
 
+// Watch expandedRows prop so that external changes (e.g. "expand all" in raw mode)
+// are reflected in the table.
+watch(
+  () => props.expandedRows,
+  async (newVal, oldVal) => {
+    // Skip if the reference is the same (no real change)
+    if (newVal === oldVal) return;
+
+    // Reset to base rows and re-apply expanded rows from scratch
+    tableRows.value = [...props.rows];
+    expandedRowIndices.value.clear();
+    expandedRowHeights.value = {};
+    actualIndexCache.value.clear();
+
+    setExpandedRows();
+
+    await nextTick();
+  },
+  { deep: true },
+);
+
 // watch(
 //   () => props.highlightQuery,
 //   async (newVal, oldVal) => {
@@ -706,9 +739,26 @@ watch(columnSizeVars, (newColSizes) => {
 
 onMounted(() => {
   setExpandedRows();
+  // Observe the scroll container size for fully adaptive expanded-row width.
+  if (parentRef.value && typeof ResizeObserver !== "undefined") {
+    containerWidth.value = parentRef.value.clientWidth;
+    containerResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const w = entry.contentRect?.width ?? (entry.target as HTMLElement).clientWidth;
+      if (w && w !== containerWidth.value) {
+        containerWidth.value = Math.round(w);
+      }
+    });
+    containerResizeObserver.observe(parentRef.value);
+  }
 });
 
 onBeforeUnmount(() => {
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
   tableRows.value.length = 0;
   tableRows.value = [];
   tableBodyRef.value = null;
@@ -783,6 +833,17 @@ watch(
 
 const parentRef = ref<HTMLElement | null>(null);
 
+// Track the visible container width reactively for expanded row sizing.
+// This makes the expanded log row width fully adaptive to the scroll container,
+// independent of the parent-provided `width` prop.
+const containerWidth = ref(0);
+let containerResizeObserver: ResizeObserver | null = null;
+
+const expandedRowWidth = computed(() => {
+  if (containerWidth.value > 0) return containerWidth.value;
+  return props.width ? props.width - 12 : 0;
+});
+
 const isFirefox = computed(() => {
   return (
     typeof document !== "undefined" && CSS.supports("-moz-appearance", "none")
@@ -834,15 +895,46 @@ const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems());
 const totalSize = computed(() => rowVirtualizer.value.getTotalSize() + 24);
 
 const setExpandedRows = () => {
-  props.expandedRows.forEach((index: any) => {
-    const virtualIndex = calculateVirtualIndex(index);
-    if (index < props.rows.length) {
-      expandRow(virtualIndex as number);
+  if (!props.expandedRows.length) return;
+
+  // Batch expand: build the expanded tableRows and expandedRowIndices in one pass.
+  // This avoids the async race condition of calling expandRow() in a loop.
+  // We sort the indices and insert expanded rows from bottom to top to keep indices stable,
+  // or rebuild from scratch.
+
+  const indicesToExpand = [...props.expandedRows]
+    .filter((index: any) => index < props.rows.length)
+    .sort((a: any, b: any) => a - b);
+
+  if (!indicesToExpand.length) return;
+
+  // Rebuild tableRows with expanded rows interleaved
+  const newTableRows: any[] = [];
+  const newExpandedIndices = new Set<number>();
+  let expandedCount = 0;
+  const expandSet = new Set(indicesToExpand);
+
+  for (let i = 0; i < props.rows.length; i++) {
+    const virtualIndex = i + expandedCount;
+    newTableRows.push(props.rows[i]);
+
+    if (expandSet.has(i)) {
+      // Insert expanded row right after
+      newTableRows.push({
+        isExpandedRow: true,
+        ...(props.rows[i] as {}),
+      });
+      newExpandedIndices.add(virtualIndex);
+      expandedCount++;
     }
-  });
-  // Clear the actual index cache since expanded rows are changing
+  }
+
+  tableRows.value = newTableRows;
+  expandedRowIndices.value = newExpandedIndices;
+  expandedRowHeights.value = {};
   actualIndexCache.value.clear();
 };
+
 
 const copyLogToClipboard = (value: any, copyAsJson: boolean = true) => {
   emits("copy", value, copyAsJson);
