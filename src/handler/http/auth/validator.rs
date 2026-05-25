@@ -162,10 +162,8 @@ pub async fn validator(
                 // Check and create organization if needed
                 check_and_create_org(user_id, &req_data.method, path).await?;
 
-                #[cfg(feature = "enterprise")]
                 let path = path.to_owned();
 
-                #[cfg(feature = "enterprise")]
                 if let Some(role) = &res.user_role
                     && role.eq(&UserRole::Viewer)
                     && req_data.method.eq(&Method::PUT)
@@ -1089,11 +1087,34 @@ pub(crate) async fn check_permissions(
 #[cfg(not(feature = "enterprise"))]
 pub(crate) async fn check_permissions(
     _user_id: &str,
-    _auth_info: AuthExtractor,
-    _role: UserRole,
+    auth_info: AuthExtractor,
+    role: UserRole,
     _is_external: bool,
 ) -> bool {
-    true
+    // Root and Admin have full access
+    if role.eq(&UserRole::Root) || role.eq(&UserRole::Admin) {
+        return true;
+    }
+
+    // ServiceAccount: allow all (access is controlled by token scope)
+    if role.eq(&UserRole::ServiceAccount) {
+        return true;
+    }
+
+    let method = auth_info.method.as_str();
+
+    // Editor: can read and write, but cannot delete
+    if role.eq(&UserRole::Editor) {
+        return method != "DELETE";
+    }
+
+    // Viewer: read-only access
+    if role.eq(&UserRole::Viewer) {
+        return method == "GET";
+    }
+
+    // User role: minimal access (login only, no API access)
+    false
 }
 
 #[cfg(feature = "enterprise")]

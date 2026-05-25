@@ -194,10 +194,6 @@ pub async fn save(
             .unwrap();
     }
 
-    #[cfg(not(feature = "enterprise"))]
-    {
-        user.role.base_role = UserRole::Admin;
-    }
     match users::post_user(&org_id, user, &initiator_id).await {
         Ok(resp) => resp,
         Err(e) => MetaHttpResponse::internal_error(e),
@@ -237,9 +233,8 @@ pub async fn update(
     Headers(user_email): Headers<UserEmail>,
     axum::Json(user): axum::Json<UpdateUser>,
 ) -> Response {
-    let email_id = email_id.trim().to_string();
-    #[cfg(not(feature = "enterprise"))]
-    let mut user = user;
+    let email_id = email_id.trim().to_lowercase();
+    let user = user;
     if user.eq(&UpdateUser::default()) {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -270,32 +265,6 @@ pub async fn update(
                 .unwrap(),
             ))
             .unwrap();
-    }
-
-    // Prevent assignment of SreAgent role via API
-    if let Some(ref role_request) = user.role
-        && let Ok(parsed_role) = role_request.role.parse::<UserRole>()
-        && parsed_role == UserRole::SreAgent
-    {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                serde_json::to_string(&meta::http::HttpResponse::error(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    "SRE Agent role cannot be assigned via API".to_string(),
-                ))
-                .unwrap(),
-            ))
-            .unwrap();
-    }
-
-    #[cfg(not(feature = "enterprise"))]
-    {
-        user.role = Some(UserRoleRequest {
-            role: UserRole::Admin.to_string(),
-            custom: None,
-        });
     }
     let initiator_id = &user_email.user_id;
     let update_mode = if user_email.user_id.eq(&email_id) {
@@ -995,10 +964,6 @@ fn check_role_available(role: &UserRole) -> Option<RolesResponse> {
     {
         None
     } else {
-        #[cfg(feature = "enterprise")]
-        if !get_openfga_config().enabled && role.ne(&UserRole::Admin) {
-            return None;
-        }
         Some(RolesResponse {
             label: role.get_label(),
             value: role.to_string(),

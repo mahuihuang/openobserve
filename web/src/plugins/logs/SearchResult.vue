@@ -185,6 +185,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             size="sm"
             dense
             borderless
+            :disable="isRawLogView"
             @update:model-value="getPageData('recordsPerPage')"
           ></q-select>
           <!-- Wrap Content Button -->
@@ -199,16 +200,66 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             dense
             class="wrap-content-btn float-right"
             :class="{
-              'wrap-content-btn--active': searchObj.meta.toggleSourceWrap,
+              'wrap-content-btn--active':
+                searchObj.meta.toggleSourceWrap && !isRawLogView,
+              'wrap-content-btn--disabled': isRawLogView,
             }"
+            :disable="isRawLogView"
             @click="
-              searchObj.meta.toggleSourceWrap = !searchObj.meta.toggleSourceWrap
+              !isRawLogView &&
+                (searchObj.meta.toggleSourceWrap =
+                  !searchObj.meta.toggleSourceWrap)
             "
           >
             <q-tooltip>
-              {{ t("search.messageWrapContent") }}
+              {{
+                isRawLogView
+                  ? t("search.wrapDisabledInRawView")
+                  : t("search.messageWrapContent")
+              }}
             </q-tooltip>
           </q-btn>
+          <!-- View Mode Toggle: Table / Raw Log -->
+          <div
+            v-if="searchObj.meta.logsVisualizeToggle === 'logs'"
+            class="view-mode-toggle float-right q-mr-sm"
+            data-test="logs-search-result-view-mode-toggle"
+          >
+            <q-btn
+              data-test="logs-search-result-view-mode-table"
+              :class="[
+                'view-mode-btn',
+                searchObj.meta.resultGrid.viewMode === 'table'
+                  ? 'view-mode-btn--active'
+                  : '',
+              ]"
+              icon="table_chart"
+              :label="t('search.tableView')"
+              flat
+              dense
+              size="sm"
+              no-caps
+              @click="setLogsViewMode('table')"
+            >
+            </q-btn>
+            <q-btn
+              data-test="logs-search-result-view-mode-raw"
+              :class="[
+                'view-mode-btn',
+                searchObj.meta.resultGrid.viewMode === 'raw'
+                  ? 'view-mode-btn--active'
+                  : '',
+              ]"
+              icon="notes"
+              :label="t('search.rawLogView')"
+              flat
+              dense
+              size="sm"
+              no-caps
+              @click="setLogsViewMode('raw')"
+            >
+            </q-btn>
+          </div>
         </div>
       </div>
 
@@ -627,6 +678,7 @@ export default defineComponent({
     "expandlog",
     "update:recordsPerPage",
     "update:columnSizes",
+    "update:viewMode",
     "sendToAiChat",
     "run-query",
   ],
@@ -771,6 +823,34 @@ export default defineComponent({
         this.$emit("update:scroll");
         this.scrollTableToTop(0);
       }
+    },
+    /**
+     * Toggle logs result grid between 'table' and 'raw' modes.
+     * In 'raw' mode the page size is forced to 25, all rows expand,
+     * and the wrap toggle is disabled. Restoring 'table' brings back
+     * the page size that was active when the user entered raw view.
+     */
+    setLogsViewMode(mode: "table" | "raw") {
+      const grid: any = this.searchObj.meta.resultGrid;
+      if (grid.viewMode === mode) return;
+
+      if (mode === "raw") {
+        grid.previousRowsPerPage = grid.rowsPerPage || 50;
+        grid.viewMode = "raw";
+        if (grid.rowsPerPage !== 25) {
+          grid.rowsPerPage = 25;
+          this.getPageData("recordsPerPage");
+        }
+      } else {
+        grid.viewMode = "table";
+        const previous = grid.previousRowsPerPage || 50;
+        if (grid.rowsPerPage !== previous) {
+          grid.rowsPerPage = previous;
+          this.getPageData("recordsPerPage");
+        }
+      }
+
+      this.$emit("update:viewMode", mode);
     },
     closeColumn(col: any) {
       let selectedFields = this.reorderSelectedFields();
@@ -1406,6 +1486,10 @@ export default defineComponent({
       emit("expandlog", index);
     };
 
+    const isRawLogView = computed(
+      () => searchObj.meta.resultGrid.viewMode === "raw",
+    );
+
     const getWidth = computed(() => {
       return "";
     });
@@ -1746,6 +1830,7 @@ export default defineComponent({
       openCorrelationPanel,
       openCorrelationFromLog,
       openLogDetailsWithCorrelation,
+      isRawLogView,
     };
   },
   computed: {
@@ -1847,5 +1932,29 @@ export default defineComponent({
   to {
     transform: translateX(0);
   }
+}
+
+/* View Mode Toggle */
+.view-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--o2-border-color, #e0e0e0);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.view-mode-btn {
+  border-radius: 0 !important;
+  opacity: 0.6;
+}
+
+.view-mode-btn--active {
+  opacity: 1;
+  background: var(--o2-hover-gray, rgba(0, 0, 0, 0.05));
+  font-weight: 600;
+}
+
+.wrap-content-btn--disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
 }
 </style>
