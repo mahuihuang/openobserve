@@ -398,6 +398,10 @@
     "selectStreamFirst": "先选择一个直播",
     "traces": "痕迹",
     "switchToLogs": "点击切换回日志",
+    "streamSwitchPromptTitle": "切换数据流",
+    "streamSwitchPromptMessage": "查询编辑器中已有查询语句。切换数据流时，您希望保留还是清空该查询语句？",
+    "streamSwitchKeepQuery": "保留查询语句",
+    "streamSwitchClearQuery": "清空查询语句",
     "patternNoValuesAvailable": "没有可用值",
     "selectLogStream": "选择日志流"
   },
