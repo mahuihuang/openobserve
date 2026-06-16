@@ -95,7 +95,13 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: "word-action", field: string, word: string, action: "include" | "exclude"): void;
+  (
+    e: "word-action",
+    field: string,
+    word: string,
+    action: "include" | "exclude",
+    isFullValue: boolean,
+  ): void;
 }>();
 
 const { t } = useI18n();
@@ -146,6 +152,12 @@ const tokens = computed(() => {
   return result;
 });
 
+// Returns true when the clicked word is exactly the entire field value, in
+// which case the parent should build an equality (=/!=) filter instead of str_match.
+const isFullValue = (word: string): boolean => {
+  return String(props.value).trim() === String(word).trim();
+};
+
 const onWordClick = (event: MouseEvent, idx: number, word: string) => {
   activeIndex.value = idx;
   selectedWord.value = word;
@@ -165,12 +177,24 @@ const onCopy = () => {
 };
 
 const onInclude = () => {
-  emit("word-action", props.fieldName, selectedWord.value, "include");
+  emit(
+    "word-action",
+    props.fieldName,
+    selectedWord.value,
+    "include",
+    isFullValue(selectedWord.value),
+  );
   activeIndex.value = null;
 };
 
 const onExclude = () => {
-  emit("word-action", props.fieldName, selectedWord.value, "exclude");
+  emit(
+    "word-action",
+    props.fieldName,
+    selectedWord.value,
+    "exclude",
+    isFullValue(selectedWord.value),
+  );
   activeIndex.value = null;
 };
 </script>

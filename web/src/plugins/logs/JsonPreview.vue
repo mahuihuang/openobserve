@@ -572,13 +572,23 @@ export default {
       field: string,
       word: string,
       action: "include" | "exclude",
+      isFullValue = false,
     ) => {
-      // Build str_match expression for the clicked word
-      const strMatchExpr =
-        action === "include"
-          ? `str_match(${field}, '${word}')`
-          : `NOT str_match(${field}, '${word}')`;
-      searchObj.data.stream.addToFilter = strMatchExpr;
+      // If the clicked word is the entire field value, use equality operators,
+      // otherwise fall back to str_match for partial matches.
+      let filterExpr: string;
+      if (isFullValue) {
+        filterExpr =
+          action === "include"
+            ? `${field} = '${word}'`
+            : `${field} != '${word}'`;
+      } else {
+        filterExpr =
+          action === "include"
+            ? `str_match(${field}, '${word}')`
+            : `NOT str_match(${field}, '${word}')`;
+      }
+      searchObj.data.stream.addToFilter = filterExpr;
     };
 
     const addFieldToTable = (value: string) => {

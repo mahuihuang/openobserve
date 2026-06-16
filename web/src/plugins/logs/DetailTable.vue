@@ -872,12 +872,22 @@ export default defineComponent({
       field: string,
       word: string,
       action: "include" | "exclude",
+      isFullValue = false,
     ) => {
-      const strMatchExpr =
-        action === "include"
-          ? `str_match(${field}, '${word}')`
-          : `NOT str_match(${field}, '${word}')`;
-      searchObj.data.stream.addToFilter = strMatchExpr;
+      let filterExpr: string;
+      if (isFullValue) {
+        // The clicked word is the entire field value: use equality operators.
+        filterExpr =
+          action === "include"
+            ? `${field} = '${word}'`
+            : `${field} != '${word}'`;
+      } else {
+        filterExpr =
+          action === "include"
+            ? `str_match(${field}, '${word}')`
+            : `NOT str_match(${field}, '${word}')`;
+      }
+      searchObj.data.stream.addToFilter = filterExpr;
     };
 
     const getContentSize = (data: any): number => {
