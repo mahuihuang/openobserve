@@ -327,7 +327,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                       :data="props.row.value"
                       :show-braces="false"
                       :query-string="highlightQuery"
-                    /><ClickableWords v-else :value="props.row.value" :field-name="props.row.field" :query-string="highlightQuery" @word-action="handleWordAction" /></pre>
+                    /><ClickableWords v-else :value="props.row.value" :field-name="props.row.field" :query-string="highlightQuery" @word-action="handleWordAction" @open-in-new-tab="handleOpenInNewTab" /></pre>
                 </div>
               </q-td>
             </template>
@@ -508,7 +508,7 @@ import { defineComponent, ref, onBeforeMount, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { useStore } from "vuex";
-import { getImageURL } from "../../utils/zincutils";
+import { getImageURL, b64EncodeUnicode } from "../../utils/zincutils";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
 import NotEqualIcon from "@/components/icons/NotEqualIcon.vue";
 import { copyToClipboard, useQuasar } from "quasar";
@@ -617,7 +617,7 @@ export default defineComponent({
     const recordSizeOptions: any = ref([10, 20, 50, 100, 200, 500, 1000]);
     const shouldWrapValues: any = ref(true);
     const { searchObj } = searchState();
-    const {fnParsedSQL, hasAggregation} = logsUtils();
+    const {fnParsedSQL, hasAggregation, generateURLQuery} = logsUtils();
 
     const $q = useQuasar();
 
@@ -890,6 +890,47 @@ export default defineComponent({
       searchObj.data.stream.addToFilter = filterExpr;
     };
 
+    const handleOpenInNewTab = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+      isFullValue = false,
+    ) => {
+      let filterExpr: string;
+      if (isFullValue) {
+        filterExpr =
+          action === "include"
+            ? `${field} = '${word}'`
+            : `${field} != '${word}'`;
+      } else {
+        filterExpr =
+          action === "include"
+            ? `str_match(${field}, '${word}')`
+            : `NOT str_match(${field}, '${word}')`;
+      }
+
+      // Combine existing query with new filter
+      let combinedQuery = searchObj.data.query || "";
+      if (searchObj.meta.sqlMode) {
+        if (combinedQuery.toLowerCase().includes("where")) {
+          combinedQuery += " AND " + filterExpr;
+        } else {
+          combinedQuery += " WHERE " + filterExpr;
+        }
+      } else {
+        combinedQuery = combinedQuery
+          ? combinedQuery + " AND " + filterExpr
+          : filterExpr;
+      }
+
+      // Build URL query params and override query with combined
+      const urlQuery = generateURLQuery();
+      urlQuery["query"] = b64EncodeUnicode(combinedQuery.trim());
+
+      const route = router.resolve({ path: "/logs", query: urlQuery });
+      window.open(route.href, "_blank");
+    };
+
     const getContentSize = (data: any): number => {
       if (data === null || data === undefined) return 0;
       if (typeof data === "string") return data.length;
@@ -928,6 +969,7 @@ export default defineComponent({
       closeTable,
       showCorrelation,
       handleWordAction,
+      handleOpenInNewTab,
       statusColor,
       tableColumns,
       tableRows,

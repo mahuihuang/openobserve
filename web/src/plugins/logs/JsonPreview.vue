@@ -334,6 +334,7 @@
             :field-name="key"
             :query-string="highlightQuery"
             @word-action="handleWordAction"
+            @open-in-new-tab="handleOpenInNewTab"
           /><span v-if="index < Object.keys(value).length - 1">,</span>
         </span>
       </div>
@@ -428,7 +429,7 @@ import {
   watch,
   onUnmounted,
 } from "vue";
-import { getImageURL, getUUID } from "@/utils/zincutils";
+import { getImageURL, getUUID, b64EncodeUnicode } from "@/utils/zincutils";
 import { useStore } from "vuex";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
 import NotEqualIcon from "@/components/icons/NotEqualIcon.vue";
@@ -446,6 +447,7 @@ import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
 import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { searchState } from "@/composables/useLogs/searchState";
+import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { useServiceCorrelation } from "@/composables/useServiceCorrelation";
 
 export default {
@@ -591,10 +593,50 @@ export default {
       searchObj.data.stream.addToFilter = filterExpr;
     };
 
+    const handleOpenInNewTab = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+      isFullValue = false,
+    ) => {
+      let filterExpr: string;
+      if (isFullValue) {
+        filterExpr =
+          action === "include"
+            ? `${field} = '${word}'`
+            : `${field} != '${word}'`;
+      } else {
+        filterExpr =
+          action === "include"
+            ? `str_match(${field}, '${word}')`
+            : `NOT str_match(${field}, '${word}')`;
+      }
+
+      let combinedQuery = searchObj.data.query || "";
+      if (searchObj.meta.sqlMode) {
+        if (combinedQuery.toLowerCase().includes("where")) {
+          combinedQuery += " AND " + filterExpr;
+        } else {
+          combinedQuery += " WHERE " + filterExpr;
+        }
+      } else {
+        combinedQuery = combinedQuery
+          ? combinedQuery + " AND " + filterExpr
+          : filterExpr;
+      }
+
+      const urlQuery = generateURLQuery();
+      urlQuery["query"] = b64EncodeUnicode(combinedQuery.trim());
+
+      const route = router.resolve({ path: "/logs", query: urlQuery });
+      window.open(route.href, "_blank");
+    };
+
     const addFieldToTable = (value: string) => {
       emit("addFieldToTable", value);
     };
     const { searchObj, searchAggData } = searchState();
+    const { generateURLQuery } = logsUtils();
 
     // Cross-linking: get all matching cross-links for a field using result_schema data
     const getCrossLinksForField = (
@@ -1134,6 +1176,7 @@ export default {
       regexPatternType,
       confirmRegexPatternType,
       handleWordAction,
+      handleOpenInNewTab,
       getContentSize,
       getCrossLinksForField,
       openCrossLink,

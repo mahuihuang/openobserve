@@ -55,6 +55,7 @@
     "copyError": "Failed to copy to clipboard",
     "copyToClipboard": "Copy to clipboard",
     "includeSearchTerm": "Include Search Term",
+    "openInNewTab": "Open in New Tab",
     "addFieldToTable": "Add field to the table",
     "removeFieldFromTable": "Remove field from the table",
     "excludeSearchTerm": "Exclude Search Term",

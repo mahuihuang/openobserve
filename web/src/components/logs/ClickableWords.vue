@@ -50,28 +50,36 @@ Deactivates back to plain text when clicking outside.
       class="clickable-words-menu"
     >
       <q-list dense class="logs-table-list">
-        <q-item clickable v-close-popup @click="onCopy">
-          <q-item-section side class="tw:min-w-0! tw:pr-2!">
-            <q-icon name="content_copy" size="xs" />
-          </q-item-section>
-          <q-item-section>{{ t("common.copyToClipboard") }}</q-item-section>
-        </q-item>
-        <q-item clickable v-close-popup @click="onInclude">
-          <q-item-section side class="tw:min-w-0! tw:pr-2!">
-            <q-icon color="currentColor" size="xs">
-              <EqualIcon />
-            </q-icon>
-          </q-item-section>
-          <q-item-section>{{ t("common.includeSearchTerm") }}</q-item-section>
-        </q-item>
-        <q-item clickable v-close-popup @click="onExclude">
-          <q-item-section side class="tw:min-w-0! tw:pr-2!">
-            <q-icon color="currentColor" size="xs">
-              <NotEqualIcon />
-            </q-icon>
-          </q-item-section>
-          <q-item-section>{{ t("common.excludeSearchTerm") }}</q-item-section>
-        </q-item>
+        <div class="clickable-words-menu-row">
+          <q-item clickable v-close-popup class="clickable-words-menu-row__main" @click="onCopy">
+            <q-item-section side class="tw:min-w-0! tw:pr-2!">
+              <q-icon name="content_copy" size="xs" />
+            </q-item-section>
+            <q-item-section>{{ t("common.copyToClipboard") }}</q-item-section>
+          </q-item>
+        </div>
+        <div class="clickable-words-menu-row">
+          <q-item clickable v-close-popup class="clickable-words-menu-row__main" @click="onInclude">
+            <q-item-section side class="tw:min-w-0! tw:pr-2!">
+              <q-icon color="currentColor" size="xs">
+                <EqualIcon />
+              </q-icon>
+            </q-item-section>
+            <q-item-section>{{ t("common.includeSearchTerm") }}</q-item-section>
+          </q-item>
+          <q-btn flat dense size="xs" icon="open_in_new" class="clickable-words-menu-row__btn" @click="onOpenNewTab('include')" :title="t('common.openInNewTab')" />
+        </div>
+        <div class="clickable-words-menu-row">
+          <q-item clickable v-close-popup class="clickable-words-menu-row__main" @click="onExclude">
+            <q-item-section side class="tw:min-w-0! tw:pr-2!">
+              <q-icon color="currentColor" size="xs">
+                <NotEqualIcon />
+              </q-icon>
+            </q-item-section>
+            <q-item-section>{{ t("common.excludeSearchTerm") }}</q-item-section>
+          </q-item>
+          <q-btn flat dense size="xs" icon="open_in_new" class="clickable-words-menu-row__btn" @click="onOpenNewTab('exclude')" :title="t('common.openInNewTab')" />
+        </div>
       </q-list>
     </q-menu>
   </span>
@@ -97,6 +105,13 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (
     e: "word-action",
+    field: string,
+    word: string,
+    action: "include" | "exclude",
+    isFullValue: boolean,
+  ): void;
+  (
+    e: "open-in-new-tab",
     field: string,
     word: string,
     action: "include" | "exclude",
@@ -197,6 +212,18 @@ const onExclude = () => {
   );
   activeIndex.value = null;
 };
+
+const onOpenNewTab = (action: "include" | "exclude") => {
+  emit(
+    "open-in-new-tab",
+    props.fieldName,
+    selectedWord.value,
+    action,
+    isFullValue(selectedWord.value),
+  );
+  showMenu.value = false;
+  activeIndex.value = null;
+};
 </script>
 
 <style scoped lang="scss">
@@ -229,5 +256,25 @@ const onExclude = () => {
 
 .clickable-words-menu {
   min-width: 180px;
+}
+
+.clickable-words-menu-row {
+  display: flex;
+  align-items: center;
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__btn {
+    margin-left: 48px;
+    margin-right: 4px;
+    border-radius: 4px;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.08);
+    }
+  }
 }
 </style>
