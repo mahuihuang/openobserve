@@ -272,7 +272,6 @@ pub async fn update_user(
     }
     let is_email_root = is_root_user(email);
 
-    #[cfg(not(feature = "enterprise"))]
     if is_email_root {
         user.role = Some(crate::common::meta::user::UserRoleRequest {
             role: UserRole::Root.to_string(),

@@ -38,6 +38,9 @@ use {
     std::str::FromStr,
 };
 
+#[cfg(not(feature = "enterprise"))]
+use crate::common::meta::ingestion::INGESTION_EP;
+
 use crate::common::{
     infra::config::{ORG_USERS, PASSWORD_HASH},
     meta::{
@@ -175,8 +178,8 @@ pub fn get_role(role: &UserOrgRole) -> UserRole {
 }
 
 #[cfg(not(feature = "enterprise"))]
-pub fn get_role(_role: &UserOrgRole) -> UserRole {
-    UserRole::Admin
+pub fn get_role(role: &UserOrgRole) -> UserRole {
+    role.base_role.clone()
 }
 
 #[cfg(feature = "enterprise")]
@@ -469,14 +472,55 @@ where
             "".to_string()
         };
 
-        // if let Some(auth_header) = parts.headers.get("Authorization") {
         if !auth_str.is_empty() {
+            let method = parts.method.to_string();
+            let local_path = parts.uri.path().to_string();
+            let cfg = config::get_config();
+            let path = match local_path
+                .strip_prefix(format!("{}/api/", cfg.common.base_uri).as_str())
+            {
+                Some(path) => path,
+                None => local_path.strip_prefix("/").unwrap_or(&local_path),
+            };
+            let path_columns = path.split('/').collect::<Vec<&str>>();
+            let url_len = path_columns.len();
+            let org_id = if url_len > 1 && path_columns[0].eq(V2_API_PREFIX) {
+                path_columns[1].to_string()
+            } else {
+                path_columns[0].to_string()
+            };
+
+            // Ingestion endpoints are always allowed (token-based auth)
+            // Search/query endpoints should also bypass permission checks so that
+            // read-only users (Viewer) can query logs via POST endpoints.
+            let bypass_check = (url_len > 0
+                && INGESTION_EP.contains(&path_columns[url_len - 1]))
+                || (method.eq("POST")
+                    && url_len > 1
+                    && (path_columns[1].starts_with("_search")
+                        || path_columns[1].starts_with("result_schema")))
+                || path.contains("/prometheus/api/v1/query")
+                || path.contains("/prometheus/api/v1/series")
+                || path.contains("/prometheus/api/v1/metadata")
+                || path.contains("/prometheus/api/v1/labels")
+                || path.contains("/prometheus/api/v1/label/")
+                || path.contains("/traces/latest")
+                || path.contains("/traces/session")
+                || path.contains("/traces/user")
+                || (path.contains("/traces/") && path.ends_with("/dag"))
+                || path.contains("/_values_stream")
+                || path.contains("/_around")
+                || path.contains("/format_query")
+                || path.contains("/resources")
+                || path.contains("query_manager")
+                || path.contains("/short");
+
             return Ok(AuthExtractor {
                 auth: auth_str.to_owned(),
-                method: "".to_string(),
+                method,
                 o2_type: "".to_string(),
-                org_id: "".to_string(),
-                bypass_check: true, // bypass check permissions
+                org_id,
+                bypass_check,
                 parent_id: "".to_string(),
                 use_all_org: false,
                 use_self_context: false,
@@ -1065,8 +1109,20 @@ mod tests {
             custom_role: None,
         };
 
-        // In non-enterprise mode, should always return Admin
-        assert_eq!(get_role(&user_role), UserRole::Admin);
+        // In non-enterprise mode, should return the actual base_role
+        assert_eq!(get_role(&user_role), UserRole::User);
+
+        let editor_role = UserOrgRole {
+            base_role: UserRole::Editor,
+            custom_role: None,
+        };
+        assert_eq!(get_role(&editor_role), UserRole::Editor);
+
+        let viewer_role = UserOrgRole {
+            base_role: UserRole::Viewer,
+            custom_role: None,
+        };
+        assert_eq!(get_role(&viewer_role), UserRole::Viewer);
     }
 
     #[cfg(not(feature = "enterprise"))]
