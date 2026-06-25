@@ -1060,7 +1060,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 @update:query="updateQueryValue"
                 @update:nlp-mode="(val) => (searchObj.meta.nlpMode = val)"
                 @run-query="handleRunQueryFn"
-                @keydown="handleKeyDown"
                 @focus="onQueryEditorFocus"
                 @blur="handleQueryEditorBlur"
               />
@@ -1108,11 +1107,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                       :read-only="isVrlEditorDisabled"
                       editor-height="100%"
                       class="monaco-editor"
+                      :class="
+                        searchObj.data.tempFunctionContent == '' &&
+                        searchObj.meta.functionEditorPlaceholderFlag
+                          ? 'empty-function'
+                          : ''
+                      "
                       @update:query="
                         searchObj.data.tempFunctionContent = $event
                       "
                       @update:nlp-mode="(val) => (vrlEditorNlpMode = val)"
-                      @keydown="handleKeyDown"
+                      @run-query="handleRunQueryFn"
                       @focus="
                         searchObj.meta.functionEditorPlaceholderFlag = false
                       "
@@ -1929,11 +1934,6 @@ export default defineComponent({
             variant: "error",
           });
         });
-    },
-    handleKeyDown(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        this.handleRunQueryFn();
-      }
     },
   },
   props: {
@@ -5161,6 +5161,11 @@ export default defineComponent({
             this.$emit("searchdata");
           }
         }
+
+        // Auto-trigger query after filter is applied
+        this.$nextTick(() => {
+          this.handleRunQueryFn();
+        });
       }
     },
     removeFieldTerm(fieldName: string) {
