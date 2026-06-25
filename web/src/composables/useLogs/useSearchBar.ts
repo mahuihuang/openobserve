@@ -289,11 +289,16 @@ export const useSearchBar = () => {
     }
   };
 
-  const onStreamChange = async (queryStr: string) => {
+  const onStreamChange = async (queryStr: string, keepQuery = false) => {
     try {
       searchObj.loadingStream = true;
       searchObj.loading = true;
       searchObj.loadingProgressPercentage = 0;
+
+      // Preserve the current query/editor content when the caller asks to keep it
+      // (e.g. user chose "Keep query" while switching streams).
+      const previousEditorValue = searchObj.data.editorValue;
+      const previousQuery = searchObj.data.query;
 
       await cancelQuery();
 
@@ -351,17 +356,23 @@ export const useSearchBar = () => {
       // Replace field list in query
       const fieldList =
         searchObj.meta.quickMode &&
-        searchObj.data.stream.interestingFieldList.length > 0
+          searchObj.data.stream.interestingFieldList.length > 0
           ? searchObj.data.stream.interestingFieldList
-              .map((field: string) => quoteSqlIdentifierIfNeeded(field))
-              .join(",")
+            .map((field: string) => quoteSqlIdentifierIfNeeded(field))
+            .join(",")
           : "*";
 
       const finalQuery = query.replace(/\[FIELD_LIST\]/g, fieldList);
 
       // Update query related states
-      searchObj.data.editorValue = finalQuery;
-      searchObj.data.query = finalQuery;
+      if (keepQuery) {
+        // Retain whatever the user had typed before switching streams.
+        searchObj.data.editorValue = previousEditorValue;
+        searchObj.data.query = previousQuery;
+      } else {
+        searchObj.data.editorValue = finalQuery;
+        searchObj.data.query = finalQuery;
+      }
       searchObj.data.tempFunctionContent = "";
       searchObj.meta.searchApplied = false;
 

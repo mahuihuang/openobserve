@@ -225,6 +225,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </template>
       </GroupedFieldList>
     </div>
+
+    <ODialog
+      v-model:open="showStreamSwitchPrompt"
+      data-test="log-stream-switch-prompt"
+      :title="t('search.streamSwitchPromptTitle')"
+      :secondary-button-label="t('search.streamSwitchClearQuery')"
+      :primary-button-label="t('search.streamSwitchKeepQuery')"
+      @click:secondary="clearQueryOnStreamSwitch"
+      @click:primary="keepQueryOnStreamSwitch"
+      @update:open="(val) => { if (!val) onStreamSwitchPromptHide() }"
+    >
+      {{ t("search.streamSwitchPromptMessage") }}
+    </ODialog>
   </div>
 </template>
 
@@ -244,6 +257,7 @@ import { useI18n } from "vue-i18n";
 import { useStore } from "vuex";
 import { useRouter } from "vue-router";
 import useLogs from "../../composables/useLogs";
+import ODialog from "@/lib/overlay/Dialog/ODialog.vue";
 import {
   b64EncodeUnicode,
   getImageURL,
@@ -296,6 +310,7 @@ export default defineComponent({
     },
   },
   components: {
+    ODialog,
     EqualIcon,
     NotEqualIcon,
     GroupedFieldList: defineAsyncComponent(
@@ -323,9 +338,38 @@ export default defineComponent({
   methods: {
     handleStreamSelection(value: string | string[] | null) {
       if (this.selectionMode === "single") {
-        this.searchObj.data.stream.selectedStream = value ? [value as string] : [];
+        const opt = typeof value === "string" ? { value } : (Array.isArray(value) ? { value: value[0] } : value);
+        if (opt?.value) {
+          this.handleSingleStreamSelect(opt);
+        }
       } else {
         this.searchObj.data.stream.selectedStream = (value as string[]) ?? [];
+        this.handleMultiStreamSelection();
+      }
+    },
+    handleMultiStreamSelection() {
+      // Clear the filter input when streams change
+      this.$nextTick(() => {
+        const indexListSelectField = this.$refs.streamSelect;
+        if (
+          indexListSelectField &&
+          indexListSelectField.inputValue &&
+          indexListSelectField.updateInputValue
+        ) {
+          indexListSelectField.updateInputValue("");
+        }
+      });
+      this.confirmStreamSwitch();
+    },
+    handleSingleStreamSelect(opt: any) {
+      if (this.searchObj.data.stream.selectedStream.indexOf(opt.value) == -1) {
+        this.searchObj.data.stream.selectedFields = [];
+      }
+      this.searchObj.data.stream.selectedStream = [opt.value];
+      // Close the popup first (synchronously) before clearing the filter.
+      const indexListSelectField = this.$refs.streamSelect as any;
+      if (indexListSelectField?.hidePopup) {
+        indexListSelectField.hidePopup();
       }
       this.$nextTick(() => {
         const indexListSelectField = this.$refs.streamSelect as any;
@@ -333,8 +377,55 @@ export default defineComponent({
           indexListSelectField.updateInputValue("");
         }
       });
-      this.onStreamChange("");
+      this.confirmStreamSwitch();
+    },
+    applyStreamChange(keepQuery: boolean) {
+      this.streamSwitchChoiceMade = true;
+      if (keepQuery) {
+        this.onStreamChange("", true);
+      } else {
+        this.onStreamChange("");
+      }
       this.resetPagination();
+      // Remember the applied selection so a later cancelled switch can revert to it.
+      this.committedStreamSelection = [
+        ...this.searchObj.data.stream.selectedStream,
+      ];
+      this.committedSelectedFields = [
+        ...this.searchObj.data.stream.selectedFields,
+      ];
+    },
+    // If the query editor already has content, ask the user whether to keep or
+    // clear it when switching streams; otherwise switch directly.
+    confirmStreamSwitch() {
+      const currentQuery = (this.searchObj.data.query || "")
+        .toString()
+        .trim();
+      if (currentQuery.length > 0) {
+        this.streamSwitchChoiceMade = false;
+        this.showStreamSwitchPrompt = true;
+      } else {
+        this.applyStreamChange(false);
+      }
+    },
+    keepQueryOnStreamSwitch() {
+      this.showStreamSwitchPrompt = false;
+      this.applyStreamChange(true);
+    },
+    clearQueryOnStreamSwitch() {
+      this.showStreamSwitchPrompt = false;
+      this.applyStreamChange(false);
+    },
+    // Triggered when the prompt closes. If the user dismissed it without choosing
+    // (e.g. clicked outside), cancel the switch and restore the previous selection.
+    onStreamSwitchPromptHide() {
+      if (this.streamSwitchChoiceMade) return;
+      this.searchObj.data.stream.selectedStream = [
+        ...this.committedStreamSelection,
+      ];
+      this.searchObj.data.stream.selectedFields = [
+        ...this.committedSelectedFields,
+      ];
     },
   },
   setup(props, { emit }) {
@@ -668,6 +759,27 @@ export default defineComponent({
         scrollToTop();
       });
     };
+
+    // Controls the "keep or clear query" prompt shown when switching streams
+    // while the query editor already has content.
+    const showStreamSwitchPrompt = ref(false);
+
+    // Snapshot of the last successfully applied stream selection. Used to revert
+    // the switch when the user dismisses the prompt (e.g. clicks outside).
+    const committedStreamSelection = ref<string[]>([]);
+    const committedSelectedFields = ref<string[]>([]);
+    // Whether the user picked keep/clear. If false when the dialog hides, the
+    // switch is cancelled and the previous selection is restored.
+    const streamSwitchChoiceMade = ref(false);
+
+    onBeforeMount(() => {
+      committedStreamSelection.value = [
+        ...(searchObj.data.stream.selectedStream || []),
+      ];
+      committedSelectedFields.value = [
+        ...(searchObj.data.stream.selectedFields || []),
+      ];
+    });
 
     watch(
       () => searchObj.meta.quickMode,
@@ -2034,6 +2146,10 @@ export default defineComponent({
       hasUserDefinedSchemas,
       setPage,
       resetPagination,
+      showStreamSwitchPrompt,
+      committedStreamSelection,
+      committedSelectedFields,
+      streamSwitchChoiceMade,
       removeFieldFromWhereAST,
       activeIncludeFilterValues,
       activeExcludeFilterValues,
