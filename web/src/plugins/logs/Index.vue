@@ -269,6 +269,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                         @update:datetime="setHistogramDate"
                         @update:scroll="getMoreData"
                         @update:recordsPerPage="getMoreDataRecordsPerPage"
+                        @update:viewMode="onLogsViewModeChange"
                         @expandlog="toggleExpandLog"
                         @send-to-ai-chat="sendToAiChat"
                         @run-query="searchData"
@@ -1513,6 +1514,35 @@ export default defineComponent({
         expandedLogs.value = expandedLogs.value.filter((item) => item != index);
       else expandedLogs.value.push(index);
     };
+
+    /**
+     * Called when the result grid view mode toggles between 'table' and 'raw'.
+     * In 'raw' mode every visible log row is expanded; switching back to
+     * 'table' collapses all expanded rows.
+     */
+    const onLogsViewModeChange = (mode: "table" | "raw") => {
+      if (mode === "raw") {
+        const total = searchObj.data?.queryResults?.hits?.length || 0;
+        // Expand every log row currently in the result set
+        expandedLogs.value = Array.from({ length: total }, (_, i) => i);
+      } else {
+        expandedLogs.value = [];
+      }
+    };
+
+    // When in raw mode and new query results arrive, auto-expand all rows
+    watch(
+      () => searchObj.data?.queryResults?.hits?.length,
+      (newLen) => {
+        if (
+          searchObj.meta.resultGrid.viewMode === "raw" &&
+          newLen &&
+          newLen > 0
+        ) {
+          expandedLogs.value = Array.from({ length: newLen }, (_, i) => i);
+        }
+      },
+    );
 
     const onSplitterUpdate = () => {
       window.dispatchEvent(new Event("resize"));
@@ -3178,6 +3208,7 @@ export default defineComponent({
       collapseFieldList,
       areStreamsPresent,
       toggleExpandLog,
+      onLogsViewModeChange,
       expandedLogs,
       fieldValues,
       onSplitterUpdate,

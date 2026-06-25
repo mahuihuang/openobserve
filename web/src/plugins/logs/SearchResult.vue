@@ -275,6 +275,43 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             @update:model-value="getPageData('pageChange')"
             data-test="logs-search-result-pagination"
           />
+          <!-- View Mode Toggle: Table / Raw Log -->
+          <div
+            v-if="searchObj.meta.logsVisualizeToggle === 'logs'"
+            class="view-mode-toggle"
+            data-test="logs-search-result-view-mode-toggle"
+          >
+            <OButton
+              data-test="logs-search-result-view-mode-table"
+              variant="ghost"
+              size="xs"
+              :class="[
+                'view-mode-btn',
+                searchObj.meta.resultGrid.viewMode === 'table'
+                  ? 'view-mode-btn--active'
+                  : '',
+              ]"
+              @click="setLogsViewMode('table')"
+            >
+              <OIcon name="table_chart" size="sm" />
+              {{ t('search.tableView') }}
+            </OButton>
+            <OButton
+              data-test="logs-search-result-view-mode-raw"
+              variant="ghost"
+              size="xs"
+              :class="[
+                'view-mode-btn',
+                searchObj.meta.resultGrid.viewMode === 'raw'
+                  ? 'view-mode-btn--active'
+                  : '',
+              ]"
+              @click="setLogsViewMode('raw')"
+            >
+              <OIcon name="notes" size="sm" />
+              {{ t('search.rawLogView') }}
+            </OButton>
+          </div>
         </div>
       </div>
 
@@ -756,6 +793,7 @@ export default defineComponent({
     "expandlog",
     "update:recordsPerPage",
     "update:columnSizes",
+    "update:viewMode",
     "sendToAiChat",
     "run-query",
   ],
@@ -882,6 +920,34 @@ export default defineComponent({
         this.$emit("update:scroll");
         this.scrollTableToTop(0);
       }
+    },
+    /**
+     * Toggle logs result grid between 'table' and 'raw' modes.
+     * In 'raw' mode the page size is forced to 25, all rows expand,
+     * and the wrap toggle is disabled. Restoring 'table' brings back
+     * the page size that was active when the user entered raw view.
+     */
+    setLogsViewMode(mode: "table" | "raw") {
+      const grid: any = this.searchObj.meta.resultGrid;
+      if (grid.viewMode === mode) return;
+
+      if (mode === "raw") {
+        grid.previousRowsPerPage = grid.rowsPerPage || 50;
+        grid.viewMode = "raw";
+        if (grid.rowsPerPage !== 25) {
+          grid.rowsPerPage = 25;
+          this.getPageData("recordsPerPage");
+        }
+      } else {
+        grid.viewMode = "table";
+        const previous = grid.previousRowsPerPage || 50;
+        if (grid.rowsPerPage !== previous) {
+          grid.rowsPerPage = previous;
+          this.getPageData("recordsPerPage");
+        }
+      }
+
+      this.$emit("update:viewMode", mode);
     },
     closeColumn(col: any) {
       let selectedFields = this.reorderSelectedFields();
@@ -1612,6 +1678,10 @@ export default defineComponent({
       emit("expandlog", index);
     };
 
+    const isRawLogView = computed(
+      () => searchObj.meta.resultGrid.viewMode === "raw",
+    );
+
     const getWidth = computed(() => {
       return "";
     });
@@ -1967,6 +2037,7 @@ export default defineComponent({
       openCorrelationPanel,
       openCorrelationFromLog,
       openLogDetailsWithCorrelation,
+      isRawLogView,
     };
   },
   computed: {
@@ -2067,5 +2138,29 @@ export default defineComponent({
   to {
     transform: translateX(0);
   }
+}
+
+/* View Mode Toggle */
+.view-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--o2-border-color, #e0e0e0);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.view-mode-btn {
+  border-radius: 0 !important;
+  opacity: 0.6;
+}
+
+.view-mode-btn--active {
+  opacity: 1;
+  background: var(--o2-hover-gray, rgba(0, 0, 0, 0.05));
+  font-weight: 600;
+}
+
+.wrap-content-btn--disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
 }
 </style>

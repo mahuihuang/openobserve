@@ -661,17 +661,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                   store.state.zoConfig.timestamp_column || '_timestamp'
                 ]
               }`"
-              :style="{
-                transform: `translateY(${virtualRow.start + (isFirefox ? baseOffset : 0)}px)`,
-                minWidth: '100%',
-              }"
+              :style="
+                (formattedRows[virtualRow.index]?.original as any)?.isExpandedRow
+                  ? {
+                      transform: `translateY(${virtualRow.start + (isFirefox ? baseOffset : 0)}px)`,
+                      width: expandedRowWidth ? expandedRowWidth + 'px' : '100%',
+                      maxWidth: expandedRowWidth ? expandedRowWidth + 'px' : '100%',
+                      left: '0',
+                    }
+                  : {
+                      transform: `translateY(${virtualRow.start + (isFirefox ? baseOffset : 0)}px)`,
+                      minWidth: '100%',
+                    }
+              "
               :data-index="virtualRow.index"
               :data-expanded="
                 formattedRows?.[virtualRow.index]?.original?.isExpandedRow
               "
               :ref="(node: any) => node && rowVirtualizer.measureElement(node)"
-              class="tw:absolute tw:flex tw:w-max tw:items-center tw:justify-start tw:border-b tw:border-b-[var(--o2-tag-grey-1)] tw:cursor-pointer hover:tw:bg-[var(--o2-hover-gray)]"
+              class="tw:absolute tw:flex tw:items-center tw:justify-start tw:border-b tw:border-b-[var(--o2-tag-grey-1)] tw:cursor-pointer hover:tw:bg-[var(--o2-hover-gray)]"
               :class="[
+                (formattedRows[virtualRow.index]?.original as any)?.isExpandedRow
+                  ? 'tw:w-full'
+                  : 'tw:w-max',
                 defaultColumns &&
                 !wrap &&
                 !(formattedRows[virtualRow.index]?.original as any)
@@ -725,7 +737,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 "
                 :colspan="columnOrder.length"
                 :data-test="`o2-table-expanded-row-${virtualRow.index}`"
-                class="tw:w-full tw:relative"
+                class="tw:w-full tw:relative tw:min-w-0 tw:overflow-hidden"
               >
                 <slot
                   name="expanded-row"
@@ -1805,9 +1817,26 @@ watch(columnSizeVars, (newColSizes) => {
 
 onMounted(() => {
   setExpandedRows();
+  // Observe the scroll container size for fully adaptive expanded-row width.
+  if (parentRef.value && typeof ResizeObserver !== "undefined") {
+    containerWidth.value = parentRef.value.clientWidth;
+    containerResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const w = entry.contentRect?.width ?? (entry.target as HTMLElement).clientWidth;
+      if (w && w !== containerWidth.value) {
+        containerWidth.value = Math.round(w);
+      }
+    });
+    containerResizeObserver.observe(parentRef.value);
+  }
 });
 
 onBeforeUnmount(() => {
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
   tableRows.value.length = 0;
   tableRows.value = [];
   tableBodyRef.value = null;
@@ -1922,6 +1951,17 @@ watch(
 );
 
 const parentRef = ref<HTMLElement | null>(null);
+
+// Track the visible container width reactively for expanded row sizing.
+// This makes the expanded row width fully adaptive to the scroll container,
+// independent of the parent-provided `width` prop.
+const containerWidth = ref(0);
+let containerResizeObserver: ResizeObserver | null = null;
+
+const expandedRowWidth = computed(() => {
+  if (containerWidth.value > 0) return containerWidth.value;
+  return props.width ? props.width - 12 : 0;
+});
 
 const isFirefox = computed(() => {
   return (
