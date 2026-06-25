@@ -245,11 +245,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                       :query-string="highlightQuery"
                       :simple-mode="false"
                     /><LogsHighLighting
-                      v-else
+                      v-else-if="typeof row.value !== 'string'"
                       :data="row.value"
                       :show-braces="false"
                       :query-string="highlightQuery"
-                    /></pre>
+                    /><ClickableWords v-else :value="row.value" :field-name="row.field" :query-string="highlightQuery" @word-action="handleWordAction" @open-in-new-tab="handleOpenInNewTab" /></pre>
                 </div>
               </div>
             </template>
@@ -425,17 +425,20 @@ import { defineComponent, ref, reactive, onBeforeMount, computed, watch } from "
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { useStore } from "vuex";
-import { getImageURL } from "../../utils/zincutils";
+import { getImageURL, b64EncodeUnicode } from "../../utils/zincutils";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
 import NotEqualIcon from "@/components/icons/NotEqualIcon.vue";
 import { copyToClipboard } from "@/utils/clipboard";
 import JsonPreview from "./JsonPreview.vue";
 import O2AIContextAddBtn from "@/components/common/O2AIContextAddBtn.vue";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { extractStatusFromLog } from "@/utils/logs/statusParser";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { searchState } from "@/composables/useLogs/searchState";
+import useLogs from "@/composables/useLogs";
+import { buildClickWordFilter } from "@/utils/logs/buildClickWordFilter";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OSelect from "@/lib/forms/Select/OSelect.vue";
 import ODropdown from "@/lib/overlay/Dropdown/ODropdown.vue";
@@ -461,7 +464,7 @@ export default defineComponent({
   name: "SearchDetail",
   components: {
     OSeparator, OCardSection,
-    OTabs, OTab, OTabPanels, OTabPanel, EqualIcon, NotEqualIcon, JsonPreview, O2AIContextAddBtn, LogsHighLighting, ChunkedContent, TelemetryCorrelationDashboard, CorrelatedLogsTable, OButton, OSelect, ODropdown, ODropdownItem, ODropdownSeparator, OSwitch, OSpinner,
+    OTabs, OTab, OTabPanels, OTabPanel, EqualIcon, NotEqualIcon, JsonPreview, O2AIContextAddBtn, LogsHighLighting, ClickableWords, ChunkedContent, TelemetryCorrelationDashboard, CorrelatedLogsTable, OButton, OSelect, ODropdown, ODropdownItem, ODropdownSeparator, OSwitch, OSpinner,
     OIcon,
     OTable,
   },
@@ -558,7 +561,8 @@ export default defineComponent({
     ]);
     const shouldWrapValues: any = ref(true);
     const { searchObj } = searchState();
-    const {fnParsedSQL, hasAggregation} = logsUtils();
+    const {fnParsedSQL, hasAggregation, generateURLQuery} = logsUtils();
+    const { getFilterExpressionByFieldType } = useLogs();
 
 
     // Watch for initialTab prop changes to update tab
@@ -835,6 +839,65 @@ export default defineComponent({
       emit("show-correlation", props.modelValue);
     };
 
+    const handleWordAction = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      const fullValue = String(rowData.value[field] ?? "");
+      const fieldMeta = searchObj.data.stream.selectedStreamFields.find(
+        (f: any) => f.name === field,
+      );
+      const filterExpr = buildClickWordFilter(
+        field,
+        word,
+        fullValue,
+        action,
+        fieldMeta,
+        getFilterExpressionByFieldType,
+      );
+      searchObj.data.stream.addToFilter = filterExpr;
+    };
+
+    const handleOpenInNewTab = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      const fullValue = String(rowData.value[field] ?? "");
+      const fieldMeta = searchObj.data.stream.selectedStreamFields.find(
+        (f: any) => f.name === field,
+      );
+      const filterExpr = buildClickWordFilter(
+        field,
+        word,
+        fullValue,
+        action,
+        fieldMeta,
+        getFilterExpressionByFieldType,
+      );
+
+      // Combine existing query with new filter
+      let combinedQuery = searchObj.data.query || "";
+      if (searchObj.meta.sqlMode) {
+        if (combinedQuery.toLowerCase().includes("where")) {
+          combinedQuery += " AND " + filterExpr;
+        } else {
+          combinedQuery += " WHERE " + filterExpr;
+        }
+      } else {
+        combinedQuery = combinedQuery
+          ? combinedQuery + " AND " + filterExpr
+          : filterExpr;
+      }
+
+      const urlQuery = generateURLQuery();
+      urlQuery["query"] = b64EncodeUnicode(combinedQuery.trim());
+
+      const route = router.resolve({ path: "/logs", query: urlQuery });
+      window.open(route.href, "_blank");
+    };
+
     const getContentSize = (data: any): number => {
       if (data === null || data === undefined) return 0;
       if (typeof data === "string") return data.length;
@@ -873,6 +936,8 @@ export default defineComponent({
       addSearchTerm,
       closeTable,
       showCorrelation,
+      handleWordAction,
+      handleOpenInNewTab,
       statusColor,
       tableColumns,
       tableRows,

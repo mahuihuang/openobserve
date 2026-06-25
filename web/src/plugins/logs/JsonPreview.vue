@@ -65,7 +65,7 @@
         />
       </div>
     </div>
-    <div v-show="activeTab !== 'unflattened'" class="tw:pl-3">
+    <div v-show="activeTab !== 'unflattened'" class="q-pl-md tw:overflow-hidden">
       {
       <div
         class="log_json_content tw:flex"
@@ -166,20 +166,25 @@
           :data-test="`log-expand-detail-key-${key}`"
           :class="store.state.theme === 'dark' ? 'dark' : ''"
         >
-          <span class="log-key">{{ key }}</span
-          ><span class="log-separator">: </span
-          ><span
-            ><ChunkedContent
-              v-if="getContentSize(value[key]) > 50000"
-              :data="value[key]"
-              :field-key="`json_preview_${key}`"
-              :query-string="highlightQuery"
-              :simple-mode="false" /><LogsHighLighting
-              v-else
-              :data="value[key]"
-              :show-braces="false"
-              :query-string="highlightQuery" /></span
-          ><span v-if="index < Object.keys(value).length - 1">,</span>
+          <span class="log-key">"{{ key }}"</span><span class="log-separator">: </span><ChunkedContent
+            v-if="getContentSize(value[key]) > 50000"
+            :data="value[key]"
+            :field-key="`json_preview_${key}`"
+            :query-string="highlightQuery"
+            :simple-mode="false"
+          /><LogsHighLighting
+            v-else-if="typeof value[key] !== 'string'"
+            :data="value[key]"
+            :show-braces="false"
+            :query-string="highlightQuery"
+          /><ClickableWords
+            v-else
+            :value="value[key]"
+            :field-name="key"
+            :query-string="highlightQuery"
+            @word-action="handleWordAction"
+            @open-in-new-tab="handleOpenInNewTab"
+          /><span v-if="index < Object.keys(value).length - 1">,</span>
         </span>
       </div>
       }
@@ -243,7 +248,7 @@ import {
   watch,
   onUnmounted,
 } from "vue";
-import { getImageURL, getUUID } from "@/utils/zincutils";
+import { getImageURL, getUUID, b64EncodeUnicode } from "@/utils/zincutils";
 import { useStore } from "vuex";
 import EqualIcon from "@/components/icons/EqualIcon.vue";
 import NotEqualIcon from "@/components/icons/NotEqualIcon.vue";
@@ -257,8 +262,12 @@ import { generateTraceContext } from "@/utils/zincutils";
 import { defineAsyncComponent } from "vue";
 import config from "@/aws-exports";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { searchState } from "@/composables/useLogs/searchState";
+import useLogs from "@/composables/useLogs";
+import { buildClickWordFilter } from "@/utils/logs/buildClickWordFilter";
+import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { useServiceCorrelation } from "@/composables/useServiceCorrelation";
 import OButton from "@/lib/core/Button/OButton.vue";
 import ODialog from "@/lib/overlay/Dialog/ODialog.vue";
@@ -316,6 +325,7 @@ export default {
     EqualIcon,
     AppTabs,
     LogsHighLighting,
+    ClickableWords,
     ChunkedContent,
     OButton,
     ODialog,
@@ -402,10 +412,71 @@ export default {
     ) => {
       emit("addSearchTerm", field, field_value, action);
     };
+
+    const handleWordAction = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      const fullValue = String(props.value?.[field] ?? "");
+      const fieldMeta = searchObj.data.stream.selectedStreamFields.find(
+        (f: any) => f.name === field,
+      );
+      const filterExpr = buildClickWordFilter(
+        field,
+        word,
+        fullValue,
+        action,
+        fieldMeta,
+        getFilterExpressionByFieldType,
+      );
+      searchObj.data.stream.addToFilter = filterExpr;
+    };
+
+    const handleOpenInNewTab = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ) => {
+      const fullValue = String(props.value?.[field] ?? "");
+      const fieldMeta = searchObj.data.stream.selectedStreamFields.find(
+        (f: any) => f.name === field,
+      );
+      const filterExpr = buildClickWordFilter(
+        field,
+        word,
+        fullValue,
+        action,
+        fieldMeta,
+        getFilterExpressionByFieldType,
+      );
+
+      let combinedQuery = searchObj.data.query || "";
+      if (searchObj.meta.sqlMode) {
+        if (combinedQuery.toLowerCase().includes("where")) {
+          combinedQuery += " AND " + filterExpr;
+        } else {
+          combinedQuery += " WHERE " + filterExpr;
+        }
+      } else {
+        combinedQuery = combinedQuery
+          ? combinedQuery + " AND " + filterExpr
+          : filterExpr;
+      }
+
+      const urlQuery = generateURLQuery();
+      urlQuery["query"] = b64EncodeUnicode(combinedQuery.trim());
+
+      const route = router.resolve({ path: "/logs", query: urlQuery });
+      window.open(route.href, "_blank");
+    };
+
     const addFieldToTable = (value: string) => {
       emit("addFieldToTable", value);
     };
     const { searchObj, searchAggData } = searchState();
+    const { getFilterExpressionByFieldType } = useLogs();
+    const { generateURLQuery } = logsUtils();
 
     // Cross-linking: get all matching cross-links for a field using result_schema data
     const getCrossLinksForField = (
@@ -932,6 +1003,8 @@ export default {
       typeOfRegexPattern,
       regexPatternType,
       confirmRegexPatternType,
+      handleWordAction,
+      handleOpenInNewTab,
       getContentSize,
       getCrossLinksForField,
       openCrossLink,
