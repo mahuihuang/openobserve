@@ -429,6 +429,7 @@ export default {
         action,
         fieldMeta,
         getFilterExpressionByFieldType,
+        store.state.zoConfig.default_fts_keys,
       );
       searchObj.data.stream.addToFilter = filterExpr;
     };
@@ -449,6 +450,7 @@ export default {
         action,
         fieldMeta,
         getFilterExpressionByFieldType,
+        store.state.zoConfig.default_fts_keys,
       );
 
       let combinedQuery = searchObj.data.query || "";

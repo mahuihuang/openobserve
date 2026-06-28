@@ -40,9 +40,10 @@ export function buildClickWordFilter(
         value: string | number | boolean,
         action: string,
     ) => string,
+    defaultFtsKeys?: string[],
 ): string {
     const escaped = word.replace(/'/g, "''");
-    const isFts = fieldMeta?.ftsKey ?? false;
+    const isFts = fieldMeta?.ftsKey || (defaultFtsKeys?.includes(fieldName) ?? false);
 
     // FTS fields: use match_all for full-text search across all indexed fields
     if (isFts) {

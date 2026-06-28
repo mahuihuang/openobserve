@@ -855,6 +855,7 @@ export default defineComponent({
         action,
         fieldMeta,
         getFilterExpressionByFieldType,
+        store.state.zoConfig.default_fts_keys,
       );
       searchObj.data.stream.addToFilter = filterExpr;
     };
@@ -875,6 +876,7 @@ export default defineComponent({
         action,
         fieldMeta,
         getFilterExpressionByFieldType,
+        store.state.zoConfig.default_fts_keys,
       );
 
       // Combine existing query with new filter
