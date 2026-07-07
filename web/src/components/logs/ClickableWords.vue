@@ -49,6 +49,8 @@ Deactivates back to plain text when clicking outside.
         class="clickable-words-menu"
         :style="menuStyle"
         @click.stop
+        @pointerdown.stop
+        @mousedown.stop
       >
       <div class="clickable-words-menu-item" @click="onCopy">
         <OIcon name="content-copy" size="sm" />
@@ -231,6 +233,11 @@ const onOpenNewTab = (action: "include" | "exclude") => {
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   padding: 6px;
+  // The menu is teleported to <body>. When it is opened from inside a modal
+  // overlay (e.g. the Source Details drawer), reka-ui sets `pointer-events: none`
+  // on <body>, which the teleported menu would otherwise inherit and become
+  // unclickable. Force pointer events back on so the menu items stay interactive.
+  pointer-events: auto;
 }
 
 :global(.clickable-words-menu-item) {
