@@ -75,7 +75,7 @@
     <div v-show="activeTab !== 'unflattened'" class="pl-3">
       {
       <div
-        class="log_json_content flex font-mono text-xs whitespace-pre-wrap"
+        class="log_json_content flex font-mono text-xs wrap-break-word break-all whitespace-pre-wrap"
         v-for="(key, index) in Object.keys(value)"
         :key="key"
         :data-test="`log-detail-row-${key}`"

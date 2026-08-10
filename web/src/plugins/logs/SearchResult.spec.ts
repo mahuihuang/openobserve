@@ -646,6 +646,61 @@ describe("SearchResult Component", () => {
     });
   });
 
+  describe("Logs View Mode Toggle (Table / Raw)", () => {
+    beforeEach(() => {
+      wrapper.vm.searchObj.meta.resultGrid.viewMode = "table";
+      wrapper.vm.searchObj.meta.resultGrid.rowsPerPage = 50;
+      wrapper.vm.searchObj.meta.resultGrid.previousRowsPerPage = 50;
+    });
+
+    it("should default to table view", () => {
+      expect(wrapper.vm.isRawLogView).toBe(false);
+    });
+
+    it("should switch to raw mode, force 25 rows per page and remember the previous size", async () => {
+      wrapper.vm.searchObj.meta.resultGrid.rowsPerPage = 100;
+
+      await wrapper.vm.setLogsViewMode("raw");
+
+      expect(wrapper.vm.searchObj.meta.resultGrid.viewMode).toBe("raw");
+      expect(wrapper.vm.searchObj.meta.resultGrid.rowsPerPage).toBe(25);
+      expect(wrapper.vm.searchObj.meta.resultGrid.previousRowsPerPage).toBe(100);
+      expect(wrapper.vm.isRawLogView).toBe(true);
+      expect(wrapper.emitted()["update:viewMode"]?.at(-1)).toEqual(["raw"]);
+    });
+
+    it("should restore the previous rows per page when switching back to table", async () => {
+      wrapper.vm.searchObj.meta.resultGrid.rowsPerPage = 100;
+      await wrapper.vm.setLogsViewMode("raw");
+
+      await wrapper.vm.setLogsViewMode("table");
+
+      expect(wrapper.vm.searchObj.meta.resultGrid.viewMode).toBe("table");
+      expect(wrapper.vm.searchObj.meta.resultGrid.rowsPerPage).toBe(100);
+      expect(wrapper.vm.isRawLogView).toBe(false);
+      expect(wrapper.emitted()["update:viewMode"]?.at(-1)).toEqual(["table"]);
+    });
+
+    it("should be a no-op when the requested mode is already active", async () => {
+      const emittedBefore = wrapper.emitted()["update:viewMode"]?.length || 0;
+
+      await wrapper.vm.setLogsViewMode("table");
+
+      expect(wrapper.vm.searchObj.meta.resultGrid.rowsPerPage).toBe(50);
+      expect(wrapper.emitted()["update:viewMode"]?.length || 0).toBe(emittedBefore);
+    });
+
+    it("should not re-request page data when raw mode already uses 25 rows", async () => {
+      wrapper.vm.searchObj.meta.resultGrid.rowsPerPage = 25;
+      const emittedBefore = wrapper.emitted()["update:recordsPerPage"]?.length || 0;
+
+      await wrapper.vm.setLogsViewMode("raw");
+
+      expect(wrapper.vm.searchObj.meta.resultGrid.viewMode).toBe("raw");
+      expect(wrapper.emitted()["update:recordsPerPage"]?.length || 0).toBe(emittedBefore);
+    });
+  });
+
   describe("Component Emits and Events", () => {
     it("should emit update:columnSizes when handleColumnSizesUpdate is called", async () => {
       const newSizes = { col1: 150 };

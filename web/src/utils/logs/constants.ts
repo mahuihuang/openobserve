@@ -145,6 +145,11 @@ export const DEFAULT_LOGS_CONFIG = {
         currentRowIndex: 0,
       },
       showPagination: true,
+      // 'table' (default tabular columns) or 'raw' (raw log view: 25 rows per page,
+      // all rows expanded, wrap toggle disabled)
+      viewMode: "table" as "table" | "raw",
+      // Stores rowsPerPage chosen in 'table' mode so it can be restored when leaving 'raw' mode
+      previousRowsPerPage: 50 as number,
     },
     jobId: "",
     jobRecords: "100",

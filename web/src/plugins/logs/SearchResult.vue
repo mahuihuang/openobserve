@@ -218,11 +218,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 variant="outline"
                 size="icon-chip"
                 :active="searchObj.meta.toggleSourceWrap"
+                :disabled="isRawLogView"
                 @click="searchObj.meta.toggleSourceWrap = !searchObj.meta.toggleSourceWrap"
                 data-test="logs-search-result-wrap-table-content-btn"
               >
                 <OIcon name="wrap-text" size="sm" />
-                <OTooltip :content="t('search.messageWrapContent')" />
+                <OTooltip
+                  :content="
+                    isRawLogView
+                      ? t('search.wrapDisabledInRawView')
+                      : t('search.messageWrapContent')
+                  "
+                />
               </OButton>
             </div>
           </template>
@@ -262,6 +269,33 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             @update:model-value="getPageData('pageChange')"
             data-test="logs-search-result-pagination"
           />
+          <!-- View Mode Toggle: Table / Raw Log -->
+          <div
+            v-if="searchObj.meta.logsVisualizeToggle === 'logs'"
+            class="inline-flex items-center gap-0.5"
+            data-test="logs-search-result-view-mode-toggle"
+          >
+            <OButton
+              data-test="logs-search-result-view-mode-table"
+              variant="outline"
+              size="chip"
+              :active="!isRawLogView"
+              @click="setLogsViewMode('table')"
+            >
+              <OIcon name="table-chart" size="sm" />
+              <span class="whitespace-nowrap">{{ t("search.tableView") }}</span>
+            </OButton>
+            <OButton
+              data-test="logs-search-result-view-mode-raw"
+              variant="outline"
+              size="chip"
+              :active="isRawLogView"
+              @click="setLogsViewMode('raw')"
+            >
+              <OIcon name="article" size="sm" />
+              <span class="whitespace-nowrap">{{ t("search.rawLogView") }}</span>
+            </OButton>
+          </div>
         </div>
       </div>
 
@@ -920,6 +954,7 @@ export default defineComponent({
     "expandlog",
     "update:recordsPerPage",
     "update:columnSizes",
+    "update:viewMode",
     "sendToAiChat",
     "run-query",
     "jump-to-stream-data",
@@ -1055,6 +1090,34 @@ export default defineComponent({
         this.scrollTableToTop(0);
       }
       return undefined;
+    },
+    /**
+     * Toggle logs result grid between 'table' and 'raw' modes.
+     * In 'raw' mode the page size is forced to 25, all rows expand,
+     * and the wrap toggle is disabled. Restoring 'table' brings back
+     * the page size that was active when the user entered raw view.
+     */
+    setLogsViewMode(mode: "table" | "raw") {
+      const grid: any = this.searchObj.meta.resultGrid;
+      if (grid.viewMode === mode) return;
+
+      if (mode === "raw") {
+        grid.previousRowsPerPage = grid.rowsPerPage || 50;
+        grid.viewMode = "raw";
+        if (grid.rowsPerPage !== 25) {
+          grid.rowsPerPage = 25;
+          this.getPageData("recordsPerPage");
+        }
+      } else {
+        grid.viewMode = "table";
+        const previous = grid.previousRowsPerPage || 50;
+        if (grid.rowsPerPage !== previous) {
+          grid.rowsPerPage = previous;
+          this.getPageData("recordsPerPage");
+        }
+      }
+
+      this.$emit("update:viewMode", mode);
     },
     closeColumn(col: any) {
       // Explicit user action — clear the system-pick marker so the result persists.
@@ -1874,6 +1937,8 @@ export default defineComponent({
       emit("expandlog", index);
     };
 
+    const isRawLogView = computed(() => searchObj.meta.resultGrid.viewMode === "raw");
+
     const getWidth = computed(() => {
       return "";
     });
@@ -2431,6 +2496,7 @@ export default defineComponent({
       openCorrelationFromLog,
       openLogDetailsWithCorrelation,
       resolveDefaultColumns,
+      isRawLogView,
     };
   },
   computed: {
