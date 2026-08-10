@@ -153,11 +153,35 @@ pub async fn check_permissions(
 #[cfg(not(feature = "enterprise"))]
 pub async fn check_permissions(
     _user_id: &str,
-    _auth_info: AuthExtractor,
-    _role: UserRole,
+    auth_info: AuthExtractor,
+    role: UserRole,
     _is_external: bool,
 ) -> bool {
-    true
+    // Root and Admin have full access
+    if role.eq(&UserRole::Root) || role.eq(&UserRole::Admin) {
+        return true;
+    }
+
+    // ServiceAccount: allow all (access is controlled by token scope)
+    if role.eq(&UserRole::ServiceAccount) {
+        return true;
+    }
+
+    let method = auth_info.method.as_str();
+
+    // Editor: can read and write, but cannot delete
+    if role.eq(&UserRole::Editor) {
+        return method != "DELETE";
+    }
+
+    // Viewer: read-only access. POST-based search/query endpoints are already
+    // allowed earlier via `bypass_check` in the auth extractor.
+    if role.eq(&UserRole::Viewer) {
+        return method == "GET";
+    }
+
+    // User role: minimal access (login only, no API access)
+    false
 }
 
 pub async fn list_objects_for_user(

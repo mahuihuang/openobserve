@@ -167,10 +167,8 @@ pub async fn validator(
                 // Check and create organization if needed
                 check_and_create_org(user_id, &req_data.method, path).await?;
 
-                #[cfg(feature = "enterprise")]
                 let path = path.to_owned();
 
-                #[cfg(feature = "enterprise")]
                 if let Some(role) = &res.user_role
                     && role.eq(&UserRole::Viewer)
                     && req_data.method.eq(&Method::PUT)
