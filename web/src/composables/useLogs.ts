@@ -36,7 +36,7 @@ import { usePagination } from "@/composables/useLogs/usePagination";
 import useStreamFields from "@/composables/useLogs/useStreamFields";
 import { useHistogram } from "@/composables/useLogs/useHistogram";
 import useSearchBar from "@/composables/useLogs/useSearchBar";
-import { quoteSqlIdentifierIfNeeded } from "@/utils/query/sqlIdentifiers";
+import { getFilterExpressionByFieldType as buildFieldTypeFilterExpression } from "@/utils/logs/fieldTypeFilter";
 import useStreamingSearch from "@/composables/useStreamingSearch";
 import { toast } from "@/lib/feedback/Toast/useToast";
 import { raw } from "@/types/i18n";
@@ -539,59 +539,7 @@ const useLogs = (t: TranslateFn) => {
     field: string | number,
     field_value: string | number | boolean,
     action: string,
-  ) => {
-    let operator = action == "include" ? "=" : "!=";
-    try {
-      let fieldType: string = "utf8";
-
-      const getStreamFieldTypes = (stream: any) => {
-        if (!stream.schema) return {};
-        return Object.fromEntries(stream.schema.map((schema: any) => [schema.name, schema.type]));
-      };
-
-      const fieldTypeList = searchObj.data.streamResults.list
-        .filter((stream: any) => searchObj.data.stream.selectedStream.includes(stream.name))
-        .reduce(
-          (acc: any, stream: any) => ({
-            ...acc,
-            ...getStreamFieldTypes(stream),
-          }),
-          {},
-        );
-
-      if (Object.hasOwn(fieldTypeList, field)) {
-        fieldType = fieldTypeList[field];
-      }
-
-      if (field_value === "null" || field_value === "" || field_value === null) {
-        operator = action == "include" ? "is" : "is not";
-        field_value = "null";
-      }
-      const quotedField =
-        searchObj.meta.sqlMode === true ? quoteSqlIdentifierIfNeeded(String(field)) : field;
-      let expression =
-        field_value == "null"
-          ? `${quotedField} ${operator} ${field_value}`
-          : `${quotedField} ${operator} '${field_value}'`;
-
-      const isNumericType = (type: string) => ["int64", "float64"].includes(type.toLowerCase());
-      const isBooleanType = (type: string) => type.toLowerCase() === "boolean";
-
-      if (isNumericType(fieldType)) {
-        expression = `${quotedField} ${operator} ${field_value}`;
-      } else if (isBooleanType(fieldType)) {
-        operator = action == "include" ? "is" : "is not";
-        expression = `${quotedField} ${operator} ${field_value}`;
-      }
-
-      return expression;
-    } catch (e: any) {
-      console.log("Error while getting filter expression by field type", e);
-      const quotedField =
-        searchObj.meta.sqlMode === true ? quoteSqlIdentifierIfNeeded(String(field)) : field;
-      return `${quotedField} ${operator} '${field_value}'`;
-    }
-  };
+  ) => buildFieldTypeFilterExpression(searchObj, field, field_value, action);
 
   /**
    * Extract value query

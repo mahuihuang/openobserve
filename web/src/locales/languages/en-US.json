@@ -538,6 +538,8 @@
     "copyError": "Failed to copy to clipboard",
     "copyToClipboard": "Copy to clipboard",
     "includeSearchTerm": "Include Search Term",
+    "includeSearchTermNewTab": "Include Search Term in New Tab",
+    "excludeSearchTermNewTab": "Exclude Search Term in New Tab",
     "addFieldToTable": "Add field to the table",
     "removeFieldFromTable": "Remove field from the table",
     "excludeSearchTerm": "Exclude Search Term",

@@ -5353,9 +5353,13 @@ export default defineComponent({
           this.searchObj.data.stream.addToFilterMode = "replace";
           if (this.queryEditorRef?.setValue)
             this.queryEditorRef.setValue(this.searchObj.data.query);
-          if (this.store.state.zoConfig.auto_query_enabled && this.searchObj.meta.liveMode) {
-            this.$emit("searchdata");
-          }
+          // Adding a filter condition always re-runs the search: the filter was
+          // an explicit user action whose only purpose is to narrow the current
+          // result set, so requiring a separate Run Query click just leaves the
+          // grid showing rows that contradict the query in the editor. This is
+          // independent of Live Mode (`auto_query_enabled` + `meta.liveMode`),
+          // which governs auto-running on time-range / stream changes.
+          this.$emit("searchdata");
         }
       }
     },

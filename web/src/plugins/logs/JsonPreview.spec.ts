@@ -62,7 +62,12 @@ vi.mock("@/services/search", () => ({
   },
 }));
 
-vi.mock("@/utils/zincutils", () => ({
+// Partial mock: only the helpers this suite asserts on are stubbed. The rest
+// must come from the real module because JsonPreview now (transitively, via the
+// field-type filter builder → sqlIdentifiers) pulls in the Vuex store, whose
+// module initialisation calls useLocalOrganization/useLocalCurrentUser.
+vi.mock("@/utils/zincutils", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   getImageURL: vi.fn(() => "mock-image-url"),
   getUUID: vi.fn(() => "mock-uuid-123"),
   generateTraceContext: vi.fn(() => ({

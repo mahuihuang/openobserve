@@ -235,6 +235,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                       :field-key="`detail_${row.field}`"
                       :query-string="highlightQuery"
                       :simple-mode="false"
+                    /><ClickableWords
+                      v-else-if="typeof row.value === 'string'"
+                      :value="row.value"
+                      :field-name="row.field"
+                      :query-string="highlightQuery"
+                      @word-action="handleWordAction"
+                      @open-in-new-tab="handleOpenInNewTab"
                     /><LogsHighLighting
                       v-else
                       :data="getDisplayValue(row.field, row.value)"
@@ -453,10 +460,14 @@ import { timestampToTimezoneDate } from "@/utils/timezone";
 import JsonPreview from "./JsonPreview.vue";
 import O2AIContextAddBtn from "@/components/common/O2AIContextAddBtn.vue";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { extractStatusFromLog } from "@/utils/logs/statusParser";
 import { logsUtils } from "@/composables/useLogs/logsUtils";
 import { searchState } from "@/composables/useLogs/searchState";
+import { buildClickWordFilter } from "@/utils/logs/buildClickWordFilter";
+import { getFilterExpressionByFieldType } from "@/utils/logs/fieldTypeFilter";
+import { b64EncodeUnicode } from "@/utils/formatters";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OSelect from "@/lib/forms/Select/OSelect.vue";
 import ODropdown from "@/lib/overlay/Dropdown/ODropdown.vue";
@@ -492,6 +503,7 @@ export default defineComponent({
     JsonPreview,
     O2AIContextAddBtn,
     LogsHighLighting,
+    ClickableWords,
     ChunkedContent,
     TelemetryCorrelationDashboard,
     CorrelatedLogsTable,
@@ -600,7 +612,7 @@ export default defineComponent({
     ]);
     const shouldWrapValues: any = ref(true);
     const { searchObj } = searchState();
-    const { fnParsedSQL, hasAggregation } = logsUtils();
+    const { fnParsedSQL, hasAggregation, generateURLQuery } = logsUtils();
 
     // Watch for initialTab prop changes to update tab
     watch(
@@ -981,6 +993,57 @@ export default defineComponent({
       emit("show-correlation", props.modelValue);
     };
 
+    /**
+     * Builds the filter expression for a word clicked inside a field value,
+     * picking match_all / field-type-aware equality / str_match based on the
+     * field's metadata. See buildClickWordFilter.
+     */
+    const buildWordFilter = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ): string => {
+      const fullValue = String(rowData.value[field] ?? "");
+      const fieldMeta = searchObj.data.stream.selectedStreamFields.find(
+        (f: any) => f.name === field,
+      );
+      return buildClickWordFilter(field, word, fullValue, action, fieldMeta, (f, v, a) =>
+        getFilterExpressionByFieldType(searchObj, f, v, a),
+      );
+    };
+
+    const handleWordAction = (field: string, word: string, action: "include" | "exclude") => {
+      // Append (AND) like the other log-row include/exclude actions rather than
+      // replacing an existing condition for the same field — the field sidebar
+      // owns "the full set of selected values", a clicked word does not.
+      searchObj.data.stream.addToFilterMode = "append";
+      // SearchBar watches addToFilter, merges the expression into the editor
+      // query and (see its addSearchTerm watcher) re-runs the search.
+      searchObj.data.stream.addToFilter = buildWordFilter(field, word, action);
+    };
+
+    const handleOpenInNewTab = (field: string, word: string, action: "include" | "exclude") => {
+      const filterExpr = buildWordFilter(field, word, action);
+
+      // Combine existing query with the new filter
+      let combinedQuery = searchObj.data.query || "";
+      if (searchObj.meta.sqlMode) {
+        if (combinedQuery.toLowerCase().includes("where")) {
+          combinedQuery += " AND " + filterExpr;
+        } else {
+          combinedQuery += " WHERE " + filterExpr;
+        }
+      } else {
+        combinedQuery = combinedQuery ? combinedQuery + " AND " + filterExpr : filterExpr;
+      }
+
+      const urlQuery = generateURLQuery();
+      urlQuery["query"] = b64EncodeUnicode(combinedQuery.trim());
+
+      const route = router.resolve({ path: "/logs", query: urlQuery });
+      window.open(route.href, "_blank");
+    };
+
     const getContentSize = (data: any): number => {
       if (data === null || data === undefined) return 0;
       if (typeof data === "string") return data.length;
@@ -1041,6 +1104,8 @@ export default defineComponent({
       addSearchTerm,
       closeTable,
       showCorrelation,
+      handleWordAction,
+      handleOpenInNewTab,
       statusColor,
       tableColumns,
       tableRows,

@@ -177,7 +177,13 @@
               :data="value[key]"
               :field-key="`json_preview_${key}`"
               :query-string="highlightQuery"
-              :simple-mode="false" /><LogsHighLighting
+              :simple-mode="false" /><ClickableWords
+              v-else-if="typeof value[key] === 'string'"
+              :value="value[key]"
+              :field-name="key"
+              :query-string="highlightQuery"
+              @word-action="handleWordAction"
+              @open-in-new-tab="handleOpenInNewTab" /><LogsHighLighting
               v-else
               :data="getDisplayValue(key, value[key])"
               :show-braces="false"
@@ -263,8 +269,13 @@ import { generateTraceContext } from "@/utils/zincutils";
 import { defineAsyncComponent } from "vue";
 import config from "@/aws-exports";
 import LogsHighLighting from "@/components/logs/LogsHighLighting.vue";
+import ClickableWords from "@/components/logs/ClickableWords.vue";
 import ChunkedContent from "@/components/logs/ChunkedContent.vue";
 import { searchState } from "@/composables/useLogs/searchState";
+import { logsUtils } from "@/composables/useLogs/logsUtils";
+import { buildClickWordFilter } from "@/utils/logs/buildClickWordFilter";
+import { getFilterExpressionByFieldType } from "@/utils/logs/fieldTypeFilter";
+import { b64EncodeUnicode } from "@/utils/formatters";
 import { useServiceCorrelation } from "@/composables/useServiceCorrelation";
 import OButton from "@/lib/core/Button/OButton.vue";
 import ODialog from "@/lib/overlay/Dialog/ODialog.vue";
@@ -323,6 +334,7 @@ export default {
     EqualIcon,
     AppTabs,
     LogsHighLighting,
+    ClickableWords,
     ChunkedContent,
     OButton,
     ODialog,
@@ -410,6 +422,58 @@ export default {
       emit("addFieldToTable", value);
     };
     const { searchObj, searchAggData } = searchState();
+    const { generateURLQuery } = logsUtils();
+
+    /**
+     * Builds the filter expression for a word clicked inside a field value,
+     * picking match_all / field-type-aware equality / str_match based on the
+     * field's metadata. See buildClickWordFilter.
+     */
+    const buildWordFilter = (
+      field: string,
+      word: string,
+      action: "include" | "exclude",
+    ): string => {
+      const fullValue = String((props.value as any)?.[field] ?? "");
+      const fieldMeta = searchObj.data.stream.selectedStreamFields.find(
+        (f: any) => f.name === field,
+      );
+      return buildClickWordFilter(field, word, fullValue, action, fieldMeta, (f, v, a) =>
+        getFilterExpressionByFieldType(searchObj, f, v, a),
+      );
+    };
+
+    const handleWordAction = (field: string, word: string, action: "include" | "exclude") => {
+      // Append (AND) like the other log-row include/exclude actions rather than
+      // replacing an existing condition for the same field — the field sidebar
+      // owns "the full set of selected values", a clicked word does not.
+      searchObj.data.stream.addToFilterMode = "append";
+      // SearchBar watches addToFilter, merges the expression into the editor
+      // query and (see its addSearchTerm watcher) re-runs the search.
+      searchObj.data.stream.addToFilter = buildWordFilter(field, word, action);
+    };
+
+    const handleOpenInNewTab = (field: string, word: string, action: "include" | "exclude") => {
+      const filterExpr = buildWordFilter(field, word, action);
+
+      // Combine existing query with the new filter
+      let combinedQuery = searchObj.data.query || "";
+      if (searchObj.meta.sqlMode) {
+        if (combinedQuery.toLowerCase().includes("where")) {
+          combinedQuery += " AND " + filterExpr;
+        } else {
+          combinedQuery += " WHERE " + filterExpr;
+        }
+      } else {
+        combinedQuery = combinedQuery ? combinedQuery + " AND " + filterExpr : filterExpr;
+      }
+
+      const urlQuery = generateURLQuery();
+      urlQuery["query"] = b64EncodeUnicode(combinedQuery.trim());
+
+      const route = router.resolve({ path: "/logs", query: urlQuery });
+      window.open(route.href, "_blank");
+    };
 
     // Cross-linking: get all matching cross-links for a field using result_schema data
     const getCrossLinksForField = (
@@ -895,6 +959,8 @@ export default {
       typeOfRegexPattern,
       regexPatternType,
       confirmRegexPatternType,
+      handleWordAction,
+      handleOpenInNewTab,
       getContentSize,
       getDisplayValue,
       getCrossLinksForField,

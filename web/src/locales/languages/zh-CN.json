@@ -425,6 +425,8 @@
     "copyError": "无法复制到剪贴板",
     "copyToClipboard": "复制到剪贴板",
     "includeSearchTerm": "包含搜索字段",
+    "includeSearchTermNewTab": "在新页面包含搜索字段",
+    "excludeSearchTermNewTab": "在新页面排除搜索字段",
     "addFieldToTable": "向表中添加字段",
     "removeFieldFromTable": "从表格中刪除字段",
     "excludeSearchTerm": "排除搜索字段",
