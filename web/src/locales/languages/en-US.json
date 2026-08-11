@@ -991,6 +991,8 @@
     "errorAddingJob": "Error while adding job",
     "toggleFunctionEditor": "Toggle Function Editor",
     "functionEditorLabel": "Function Editor",
+    "exactTotalCountLabel": "Exact Total Count",
+    "exactTotalCountTooltip": "Resolve the exact number of matching events. This needs an extra count request and the results are only marked complete once it returns. Off, the total is shown as an approximation (e.g. 1.2K+) and results appear sooner.",
     "functionLabel": "Function",
     "actionLabel": "Action",
     "transformLabel": "Transform",

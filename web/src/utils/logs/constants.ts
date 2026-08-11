@@ -166,6 +166,11 @@ export const DEFAULT_LOGS_CONFIG = {
     resetPlotChart: false,
     clearCache: false,
     liveMode: localStorage.getItem("oo_toggle_auto_run") === "true",
+    // Opt-in exact total hit count. When false (default) the follow-up
+    // `track_total_hits` count request is skipped and the results header shows
+    // an approximate total ("1.2K+"), so the page finishes as soon as the rows
+    // themselves arrive instead of waiting on a second full scan.
+    trackTotalHits: localStorage.getItem("oo_toggle_track_total_hits") === "true",
   },
   data: {
     query: "" as any,

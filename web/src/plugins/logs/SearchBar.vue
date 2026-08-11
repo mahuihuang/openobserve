@@ -491,6 +491,36 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 </span>
               </template>
             </ODropdownItem>
+
+            <!-- Exact total count — opt-in. Off by default: resolving the exact
+              total needs a second full-scan request, and the results are only
+              considered loaded once it returns. Off, the header shows an
+              approximate total ("1.2K+") and the page settles as soon as the
+              rows arrive. -->
+            <ODropdownItem
+              data-test="logs-search-bar-menu-track-total-hits-toggle-btn"
+              @select.prevent="toggleTrackTotalHits"
+            >
+              <template #icon-left>
+                <span
+                  class="rounded-default bg-section-header-bg text-text-secondary inline-flex h-7 w-7 shrink-0 items-center justify-center"
+                >
+                  <OIcon name="format-list-numbered" size="sm" />
+                </span>
+              </template>
+              {{ t("search.exactTotalCountLabel") }}
+              <template #icon-right>
+                <span class="ml-auto flex items-center gap-1">
+                  <OSwitch
+                    data-test="logs-search-bar-track-total-hits-toggle"
+                    :model-value="searchObj.meta.trackTotalHits"
+                    size="md"
+                    @click.stop="toggleTrackTotalHits"
+                  />
+                </span>
+              </template>
+              <OTooltip :content="t('search.exactTotalCountTooltip')" />
+            </ODropdownItem>
           </ODropdownGroup>
 
           <ODropdownSeparator />
@@ -4474,6 +4504,11 @@ export default defineComponent({
       localStorage.setItem("oo_toggle_auto_run", String(searchObj.meta.liveMode));
     };
 
+    const toggleTrackTotalHits = () => {
+      searchObj.meta.trackTotalHits = !searchObj.meta.trackTotalHits;
+      localStorage.setItem("oo_toggle_track_total_hits", String(searchObj.meta.trackTotalHits));
+    };
+
     const handleHistogramMode = () => {};
 
     const handleRunQueryFn = (clear_cache = false) => {
@@ -5181,6 +5216,7 @@ export default defineComponent({
       toggleViewOptions,
       currentToggleOption,
       toggleLiveMode,
+      toggleTrackTotalHits,
       aiQueryPlaceholder,
       editorPlaceholder,
       vrlPlaceholder,

@@ -1005,6 +1005,7 @@ export default defineComponent({
           if (savedAutoRun !== null) {
             searchObj.meta.liveMode = savedAutoRun === "true";
           }
+          restoreTrackTotalHitsPreference();
           await nextTick();
           await getStreamList(false);
           await nextTick();
@@ -1034,11 +1035,22 @@ export default defineComponent({
       return store.state.zoConfig.histogram_enabled;
     }
 
+    /**
+     * meta is restored from the Vuex snapshot, which can be staler than
+     * localStorage after the user toggles the preference and navigates away and
+     * back. Re-read it on every activation, same as the auto-run toggle above.
+     */
+    function restoreTrackTotalHitsPreference() {
+      const saved = localStorage.getItem("oo_toggle_track_total_hits");
+      searchObj.meta.trackTotalHits = saved === "true";
+    }
+
     const handleActivation = async () => {
       const savedAutoRun = localStorage.getItem("oo_toggle_auto_run");
       if (savedAutoRun !== null) {
         searchObj.meta.liveMode = savedAutoRun === "true";
       }
+      restoreTrackTotalHitsPreference();
 
       try {
         const queryParams: any = router.currentRoute.value.query;

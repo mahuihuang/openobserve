@@ -34,6 +34,7 @@ const createMockState = () => ({
       refreshHistogram: false,
       resultGrid: { chartInterval: "1m" },
       histogramDirtyFlag: false,
+      trackTotalHits: false,
     },
     loading: false,
     loadingHistogram: false,
@@ -187,6 +188,48 @@ describe("useSearchHistogramManager", () => {
 
       const result = histogramManager.shouldGetPageCount(queryReq, parsedSQL);
       expect(result).toBe(false);
+    });
+  });
+
+  describe("isExactTotalWanted", () => {
+    // The exact-total (`track_total_hits`) request is opt-in: it costs a second
+    // full-scan round trip and the results are only marked complete once it
+    // returns, so meta.trackTotalHits gates it. shouldGetPageCount stays
+    // ungated because it also drives the estimated total and the extra-hit trim.
+    const countableQuery = () => {
+      mockState.searchObj.meta.sqlMode = false;
+      mockHistogramFunctions.isHistogramEnabled.mockReturnValue(false);
+      const utils = logsUtils();
+      vi.mocked(utils.isLimitQuery).mockReturnValue(false);
+      return { queryReq: { query: { from: 0, size: 100 } }, parsedSQL: {} };
+    };
+
+    it("is false by default (flag off) even for a countable query", () => {
+      const { queryReq, parsedSQL } = countableQuery();
+      mockState.searchObj.meta.trackTotalHits = false;
+
+      expect(histogramManager.shouldGetPageCount(queryReq, parsedSQL)).toBe(true);
+      expect(histogramManager.isExactTotalWanted(queryReq, parsedSQL)).toBe(false);
+    });
+
+    it("is true once the flag is enabled for a countable query", () => {
+      const { queryReq, parsedSQL } = countableQuery();
+      mockState.searchObj.meta.trackTotalHits = true;
+
+      expect(histogramManager.isExactTotalWanted(queryReq, parsedSQL)).toBe(true);
+    });
+
+    it("stays false for a non-countable query even when the flag is enabled", () => {
+      mockState.searchObj.meta.trackTotalHits = true;
+      mockState.searchObj.meta.sqlMode = true;
+      const utils = logsUtils();
+      vi.mocked(utils.isLimitQuery).mockReturnValue(true);
+
+      const queryReq = { query: { from: 0, size: 100 } };
+      const parsedSQL = { limit: 100 };
+
+      expect(histogramManager.shouldGetPageCount(queryReq, parsedSQL)).toBe(false);
+      expect(histogramManager.isExactTotalWanted(queryReq, parsedSQL)).toBe(false);
     });
   });
 

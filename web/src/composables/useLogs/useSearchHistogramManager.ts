@@ -143,7 +143,7 @@ export const useSearchHistogramManager = () => {
         isWithQuery(parsedSQL) ||
         !searchObj.data.queryResults.is_histogram_eligible)
     ) {
-      if (shouldGetPageCount(queryReq, parsedSQL) && isFromZero) {
+      if (isExactTotalWanted(queryReq, parsedSQL) && isFromZero) {
         setTimeout(async () => {
           searchObjDebug["pagecountStartTime"] = performance.now();
           getPageCountThroughSocket(
@@ -169,7 +169,7 @@ export const useSearchHistogramManager = () => {
       }
       searchObj.meta.histogramDirtyFlag = false;
     } else {
-      if (shouldGetPageCount(queryReq, parsedSQL) && isFromZero) {
+      if (isExactTotalWanted(queryReq, parsedSQL) && isFromZero) {
         setTimeout(async () => {
           searchObjDebug["pagecountStartTime"] = performance.now();
           getPageCountThroughSocket(
@@ -342,6 +342,19 @@ export const useSearchHistogramManager = () => {
       : true;
   };
 
+  /**
+   * Whether to fire the follow-up `track_total_hits` request that resolves the
+   * exact total hit count.
+   *
+   * `shouldGetPageCount` only answers "is this query shape countable" and is
+   * also what drives the *estimated* total and the extra-hit trim in
+   * useSearchResponseHandler, so it must stay independent of the user's
+   * preference — gating it there would leave a phantom row on every page and
+   * break pagination. The opt-in is applied here, at the request itself.
+   */
+  const isExactTotalWanted = (queryReq: any, parsedSQL: any): boolean =>
+    searchObj.meta.trackTotalHits === true && shouldGetPageCount(queryReq, parsedSQL);
+
   const resetHistogramResults = () => {
     histogramResults = [];
   };
@@ -356,6 +369,7 @@ export const useSearchHistogramManager = () => {
     handleHistogramResponse,
     isHistogramDataMissing,
     shouldGetPageCount,
+    isExactTotalWanted,
     getPageCountThroughSocket,
     resetHistogramResults,
     getHistogramResults,

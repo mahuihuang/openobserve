@@ -850,6 +850,8 @@
     "functionSelectionNotSupportedVisualization": "可视化不支持函数选择",
     "toggleFunctionEditor": "切换函数编辑器",
     "functionEditorLabel": "函数编辑器",
+    "exactTotalCountLabel": "精确总条数",
+    "exactTotalCountTooltip": "查询匹配事件的精确总数。这需要额外发起一次计数请求，且查询要等该请求返回后才算完成。关闭时总数以近似值显示（如 1.2K+），结果呈现更快。",
     "functionLabel": "函数",
     "actionLabel": "操作",
     "transformLabel": "转换",
