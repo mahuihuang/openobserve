@@ -281,7 +281,7 @@ export const useSearchBar = (t: TranslateFn) => {
     }
   };
 
-  const onStreamChange = async (queryStr: string) => {
+  const onStreamChange = async (queryStr: string, keepQuery = false) => {
     try {
       // Only flag the results grid as loading when a search will actually run;
       // otherwise this call just refreshes the stream schema.
@@ -292,6 +292,11 @@ export const useSearchBar = (t: TranslateFn) => {
       searchObj.loadingStream = true;
       searchObj.loading = willRunQuery;
       searchObj.loadingProgressPercentage = 0;
+
+      // Preserve the current query/editor content when the caller asks to keep it
+      // (e.g. user chose "Keep query" while switching streams).
+      const previousEditorValue = searchObj.data.editorValue;
+      const previousQuery = searchObj.data.query;
 
       await cancelQuery();
 
@@ -356,8 +361,14 @@ export const useSearchBar = (t: TranslateFn) => {
       const finalQuery = query.replace(/\[FIELD_LIST\]/g, fieldList);
 
       // Update query related states
-      searchObj.data.editorValue = finalQuery;
-      searchObj.data.query = finalQuery;
+      if (keepQuery) {
+        // Retain whatever the user had typed before switching streams.
+        searchObj.data.editorValue = previousEditorValue;
+        searchObj.data.query = previousQuery;
+      } else {
+        searchObj.data.editorValue = finalQuery;
+        searchObj.data.query = finalQuery;
+      }
       searchObj.data.tempFunctionContent = "";
 
       // Update histogram visibility

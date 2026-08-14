@@ -246,6 +246,23 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </template>
       </GroupedFieldList>
     </div>
+
+    <ODialog
+      v-model:open="showStreamSwitchPrompt"
+      data-test="log-stream-switch-prompt"
+      :title="t('search.streamSwitchPromptTitle')"
+      :secondary-button-label="t('search.streamSwitchClearQuery')"
+      :primary-button-label="t('search.streamSwitchKeepQuery')"
+      @click:secondary="clearQueryOnStreamSwitch"
+      @click:primary="keepQueryOnStreamSwitch"
+      @update:open="
+        (val) => {
+          if (!val) onStreamSwitchPromptHide();
+        }
+      "
+    >
+      {{ t("search.streamSwitchPromptMessage") }}
+    </ODialog>
   </div>
 </template>
 
@@ -265,6 +282,7 @@ import { raw, useI18nTyped } from "@/types/i18n";
 import { useStore } from "vuex";
 import { useRouter } from "vue-router";
 import useLogs from "../../composables/useLogs";
+import ODialog from "@/lib/overlay/Dialog/ODialog.vue";
 import {
   b64EncodeUnicode,
   getImageURL,
@@ -313,6 +331,7 @@ export default defineComponent({
     },
   },
   components: {
+    ODialog,
     GroupedFieldList: defineAsyncComponent(
       () => import("@/components/common/GroupedFieldList.vue"),
     ),
@@ -331,6 +350,7 @@ export default defineComponent({
   emits: ["setInterestingFieldInSQLQuery"],
   methods: {
     handleStreamSelection(value: SelectModelValue) {
+      const previousSelection = [...this.searchObj.data.stream.selectedStream];
       if (this.selectionMode === "single") {
         this.searchObj.data.stream.selectedStream = value ? [value as string] : [];
       } else {
@@ -342,8 +362,44 @@ export default defineComponent({
           indexListSelectField.updateInputValue("");
         }
       });
-      this.onStreamChange("");
+      this.confirmStreamSwitch(previousSelection);
+    },
+    // A query already in the editor is the user's own work, so ask before the
+    // stream switch overwrites it. An empty editor has nothing to lose — switch
+    // straight away, which keeps the original no-prompt behaviour intact.
+    confirmStreamSwitch(previousSelection: string[]) {
+      if (!(this.searchObj.data.query || "").toString().trim()) {
+        this.applyStreamChange(false);
+        return;
+      }
+      this.selectionBeforeStreamSwitch = previousSelection;
+      this.streamSwitchChoiceMade = false;
+      this.showStreamSwitchPrompt = true;
+    },
+    applyStreamChange(keepQuery: boolean) {
+      this.streamSwitchChoiceMade = true;
+      // The default path keeps the original single-argument call, so a stream
+      // switch without a prompt behaves byte-for-byte as it did before.
+      if (keepQuery) {
+        this.onStreamChange("", true);
+      } else {
+        this.onStreamChange("");
+      }
       this.resetPagination();
+    },
+    keepQueryOnStreamSwitch() {
+      this.showStreamSwitchPrompt = false;
+      this.applyStreamChange(true);
+    },
+    clearQueryOnStreamSwitch() {
+      this.showStreamSwitchPrompt = false;
+      this.applyStreamChange(false);
+    },
+    // Dismissed without choosing (Escape / click outside) means "cancel the
+    // switch", so put the stream the user came from back.
+    onStreamSwitchPromptHide() {
+      if (this.streamSwitchChoiceMade) return;
+      this.searchObj.data.stream.selectedStream = [...this.selectionBeforeStreamSwitch];
     },
     // One-click stream pick from the empty state — mirrors a dropdown
     // selection so fields load immediately, without opening the dropdown.
@@ -649,6 +705,17 @@ export default defineComponent({
         scrollToTop();
       });
     };
+
+    // Controls the "keep or clear query" prompt shown when switching streams
+    // while the query editor already has content.
+    const showStreamSwitchPrompt = ref(false);
+    // The selection to fall back to if the prompt is dismissed. Captured at the
+    // moment of the switch rather than tracked continuously, so selections made
+    // elsewhere (saved views, URL restore) can never leave it stale.
+    const selectionBeforeStreamSwitch = ref<string[]>([]);
+    // Whether the user picked keep/clear. If false when the dialog hides, the
+    // switch is cancelled and the previous selection is restored.
+    const streamSwitchChoiceMade = ref(false);
 
     watch(
       () => searchObj.meta.quickMode,
@@ -1899,6 +1966,9 @@ export default defineComponent({
       hasUserDefinedSchemas,
       setPage,
       resetPagination,
+      showStreamSwitchPrompt,
+      selectionBeforeStreamSwitch,
+      streamSwitchChoiceMade,
       removeFieldFromWhereAST,
       activeIncludeFilterValues,
       activeExcludeFilterValues,
