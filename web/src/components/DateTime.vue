@@ -25,11 +25,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       @update:open="onMenuOpenChange"
     >
       <template #trigger>
+        <!-- Rendered as a div (never a <button>) so the element identity is stable
+             across Relative/Absolute switches: swapping the tag mid-open would
+             detach the popover's positioning reference and hide the panel. The
+             nested arrow button keeps the control keyboard-operable, and in
+             absolute mode the label itself is an editable field. -->
         <OButton
           :data-test="dataTestName"
           id="date-time-button"
           ref="datetimeBtn"
           data-cy="date-time-button"
+          as="div"
+          role="group"
           :variant="variant"
           size="sm-toolbar"
           :class="{
@@ -37,22 +44,56 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             hideRelative: disableRelative,
             'min-w-71.5': !disableRelative && selectedType === 'absolute',
             'w-fit': disableRelative,
+            'pointer-events-none opacity-50': disable,
           }"
           :disabled="disable"
           icon-left="schedule"
         >
-          <span class="date-time-label flex-1 text-left font-semibold">{{ triggerLabel }}</span>
+          <!-- Absolute ranges are typed directly here (parsed on Enter/blur) so
+               the applied window can be edited without opening the panel. The
+               picker itself still opens from the icon / arrow / any other spot. -->
+          <input
+            v-if="isRangeEditable"
+            ref="rangeInputRef"
+            data-test="date-time-range-input"
+            class="date-time-range-input min-w-0 bg-transparent text-left font-semibold outline-none"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            :size="rangeInputSize"
+            :value="rangeInputText"
+            :aria-label="t('common.editTimeRange')"
+            :title="t('common.editTimeRange')"
+            @input="rangeInputText = ($event.target as HTMLInputElement).value"
+            @click.stop
+            @mousedown.stop
+            @pointerdown.stop
+            @keydown.stop="onRangeInputKeydown"
+            @blur="onRangeInputBlur"
+          />
+          <span v-else class="date-time-label flex-1 text-left font-semibold">{{
+            triggerLabel
+          }}</span>
           <template #icon-right
-            ><OIcon
-              name="arrow-drop-down"
-              size="sm"
-              class="date-time-arrow ml-auto text-lg! transition-transform duration-250"
-          /></template>
+            ><button
+              type="button"
+              data-test="date-time-toggle-btn"
+              class="focus-visible:ring-accent/25 ml-auto flex cursor-pointer items-center rounded outline-none focus-visible:ring-2"
+              :aria-label="t('common.openTimeRangePicker')"
+              :aria-expanded="menuOpen"
+              :disabled="disable"
+              @click.stop="menuOpen = !menuOpen"
+            >
+              <OIcon
+                name="arrow-drop-down"
+                size="sm"
+                class="date-time-arrow text-lg! transition-transform duration-250" /></button
+          ></template>
         </OButton>
       </template>
       <div
         id="date-time-menu"
-        class="date-time-dialog z-10001 max-h-(--reka-popper-available-height,37.5rem) w-81.25 overflow-y-auto"
+        class="date-time-dialog z-10001 max-h-(--reka-popper-available-height,37.5rem) w-87.5 overflow-y-auto"
         @keydown.capture="onPickerKeydown"
       >
         <div class="flex items-center gap-1 px-3 py-2">
@@ -118,20 +159,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                           queryRangeRestrictionInHour && queryRangeRestrictionInHour > 0
                       "
                       :data-test="`date-time-relative-${item}-${period.value}-btn`"
-                      class="h-8! w-8! font-bold! disabled:opacity-35"
-                      :class="
-                        selectedType == 'relative' &&
-                        relativePeriod == period.value &&
-                        relativeValue == item
+                      class="h-8! font-bold! disabled:opacity-35"
+                      :class="[
+                        isTodayItem(item) ? 'w-auto! px-2!' : 'w-8!',
+                        isRelativeItemSelected(period.value, item)
                           ? 'bg-button-primary! text-button-primary-foreground!'
-                          : `bg-[color-mix(in_srgb,var(--color-text-heading)_7%,transparent)]! ${relativePeriod}`
-                      "
+                          : `bg-[color-mix(in_srgb,var(--color-text-heading)_7%,transparent)]! ${relativePeriod}`,
+                      ]"
                       variant="ghost"
                       size="xs"
-                      @click="setRelativeDate(period.value, item)"
+                      @click="onRelativeItemClick(period.value, item)"
                       :key="'period_' + item_index"
                     >
-                      {{ item }}
+                      {{ isTodayItem(item) ? t("common.today") : item }}
                       <OTooltip
                         v-if="
                           relativeDatesInHour[period.value][item_index] >
@@ -175,7 +215,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                     </div>
                     <div class="flex min-w-0 flex-1 flex-col">
                       <OSelect
-                        v-model="relativePeriod"
+                        v-model="customPeriod"
                         :options="relativePeriodsSelect"
                         @update:model-value="onCustomPeriodSelect"
                       >
@@ -327,6 +367,16 @@ interface ConsumableDateTime {
   valueType?: string;
   userChangedValue?: boolean;
 }
+
+/**
+ * Relative period token for "midnight today → now". It lives in the Days row as
+ * its first preset, but is its own period unit (not `<n>d`) because its length is
+ * not a fixed duration. Mirrors `TODAY_RELATIVE_PERIOD` in `@/utils/date`, which
+ * resolves the same token for every consumer that re-derives the window from
+ * `relativeTimePeriod` (URL restore, auto-refresh, share links). Kept as a local
+ * literal so this component's only `@/utils/date` import stays `subtractRelativeTime`.
+ */
+const TODAY_PERIOD = "today";
 
 export default defineComponent({
   components: {
@@ -487,11 +537,11 @@ export default defineComponent({
       { label: t("common.months"), value: "M" },
     ]);
 
-    const relativeDates: Record<string, number[]> = {
+    const relativeDates: Record<string, (number | string)[]> = {
       s: [1, 5, 10, 15, 30, 45],
       m: [1, 5, 10, 15, 30, 45],
       h: [1, 2, 3, 6, 8, 12],
-      d: [1, 2, 3, 4, 5, 6],
+      d: [TODAY_PERIOD, 1, 2, 3, 4, 5],
       w: [1, 2, 3, 4, 5, 6],
       M: [1, 2, 3, 4, 5, 6],
     };
@@ -500,7 +550,8 @@ export default defineComponent({
       s: [1, 1, 1, 1, 1, 1],
       m: [1, 1, 1, 1, 1, 1],
       h: [1, 2, 3, 6, 8, 12],
-      d: [24, 48, 72, 96, 120, 144],
+      // "today" spans at most 24h, so it obeys the same restriction as 1 day.
+      d: [24, 24, 48, 72, 96, 120],
       w: [168, 336, 504, 672, 840, 1008],
       M: [744, 1488, 2232, 2976, 3720, 4464],
     };
@@ -616,7 +667,43 @@ export default defineComponent({
       if (props.autoApply) saveDate("relative");
     };
 
+    /** True for the "Today" preset cell in the Days row. */
+    const isTodayItem = (item: number | string) => item === TODAY_PERIOD;
+
+    const isTodayPeriod = computed(() => relativePeriod.value === TODAY_PERIOD);
+
+    // The custom row only deals in durations, so it shows Days while the Today
+    // preset is active ("today" is not one of its options) and writes through on pick.
+    const customPeriod = computed({
+      get: () => (isTodayPeriod.value ? "d" : relativePeriod.value),
+      set: (value: string) => {
+        relativePeriod.value = value;
+      },
+    });
+
+    const isRelativeItemSelected = (period: string, item: number | string) => {
+      if (selectedType.value !== "relative") return false;
+      if (isTodayItem(item)) return isTodayPeriod.value;
+      return relativePeriod.value === period && relativeValue.value === item;
+    };
+
+    const onRelativeItemClick = (period: string, item: number | string) => {
+      // "today" is its own unit; relativeValue is left untouched so switching back
+      // to a duration preset (or the custom row) keeps a sane number.
+      if (isTodayItem(item)) {
+        selectedType.value = "relative";
+        relativePeriod.value = TODAY_PERIOD;
+        if (props.autoApply) saveDate("relative");
+        return;
+      }
+      setRelativeDate(period, item as number);
+    };
+
     const onCustomPeriodSelect = () => {
+      // Editing the custom row means a duration; "today" has no numeric value, so
+      // fall back to Days (what the row already displays for it).
+      if (isTodayPeriod.value) relativePeriod.value = "d";
+
       if (
         selectedType.value == "relative" &&
         props.queryRangeRestrictionInHour > 0 &&
@@ -635,6 +722,11 @@ export default defineComponent({
     };
 
     const setRelativeTime = (period: string) => {
+      if (period?.trim().toLowerCase() === TODAY_PERIOD) {
+        relativePeriod.value = TODAY_PERIOD;
+        return;
+      }
+
       const periodString = period?.match(/(\d+)([smhdwM])/);
 
       if (periodString) {
@@ -675,6 +767,18 @@ export default defineComponent({
       return;
     };
 
+    /** Writes an epoch-microsecond window into the absolute selection. */
+    const setSelectionFromMicros = (startMicros: number, endMicros: number) => {
+      const startDateTime = convertUnixTime(startMicros);
+      const endDateTime = convertUnixTime(endMicros);
+
+      selectedDate.value.from = startDateTime.date;
+      selectedDate.value.to = endDateTime.date;
+
+      selectedTime.value.startTime = startDateTime.time;
+      selectedTime.value.endTime = endDateTime.time;
+    };
+
     const setAbsoluteTime = (startTime: number, endTime: number) => {
       // Parent-invoked setter — the resulting auto-apply emit is programmatic.
       markProgrammaticDateChange();
@@ -685,14 +789,7 @@ export default defineComponent({
         return;
       }
 
-      const startDateTime = convertUnixTime(startTime);
-      const endDateTime = convertUnixTime(endTime);
-
-      selectedDate.value.from = startDateTime.date;
-      selectedDate.value.to = endDateTime.date;
-
-      selectedTime.value.startTime = startDateTime.time;
-      selectedTime.value.endTime = endDateTime.time;
+      setSelectionFromMicros(startTime, endTime);
     };
 
     function convertUnixTime(unixTimeMicros: number) {
@@ -808,6 +905,9 @@ export default defineComponent({
         d: "Days",
         w: "Weeks",
         M: "Months",
+        // "today" isn't a duration; the custom row reads as Days for it, and the
+        // trigger label / resolved window are handled by their own today branches.
+        [TODAY_PERIOD]: "Days",
       };
       return periodMapping[relativePeriod.value];
     });
@@ -818,6 +918,20 @@ export default defineComponent({
 
     const getConsumableDateTime = (): ConsumableDateTime => {
       if (selectedType.value == "relative") {
+        // "Today" = start of the current day in the selected timezone → now.
+        if (isTodayPeriod.value) {
+          const today = timestampToTimezoneDate(
+            new Date().getTime(),
+            store.state.timezone,
+            "yyyy/MM/dd",
+          );
+          return {
+            startTime: absoluteToMicros(today, "00:00:00"),
+            endTime: new Date().getTime() * 1000,
+            relativeTimePeriod: TODAY_PERIOD,
+          };
+        }
+
         let period = getPeriodLabel.value.toLowerCase();
         let periodValue = relativeValue.value;
 
@@ -948,6 +1062,7 @@ export default defineComponent({
 
     const getDisplayValue = computed(() => {
       if (!props.disableRelative && selectedType.value === "relative") {
+        if (isTodayPeriod.value) return t("common.today") as string;
         return `Past ${relativeValue.value} ${getPeriodLabel.value}`;
       } else {
         if (selectedDate.value != null) {
@@ -996,47 +1111,45 @@ export default defineComponent({
       if (props.autoApply) saveDate(null);
     };
 
-    const applyParsedRange = (text: string): boolean => {
+    /**
+     * Resolves free-form range text (the copy payload, an absolute range, an epoch
+     * pair, or a single date-time) to an epoch-microsecond window.
+     *
+     * A single value is applied to whichever side of the current range it sits
+     * closer to — e.g. a range of 5:00-10:00 given 7:00 becomes 7:00-10:00 (closer
+     * to start), while 13:00 becomes 5:00-13:00 (closer to end). There's no cursor
+     * to anchor a side to, so proximity is the next best signal of intent.
+     */
+    const resolveRangeText = (text: string): { startMicros: number; endMicros: number } | null => {
       const parsed = parseDateRangeString(text);
-      if (!parsed) return false;
-      if (parsed.type === "timestamp") {
-        finalizeAbsoluteRange(parsed.startMicros, parsed.endMicros);
-      } else {
-        finalizeAbsoluteRange(
-          absoluteToMicros(parsed.startDate, parsed.startTime),
-          absoluteToMicros(parsed.endDate, parsed.endTime),
-        );
+      if (parsed) {
+        return parsed.type === "timestamp"
+          ? { startMicros: parsed.startMicros, endMicros: parsed.endMicros }
+          : {
+              startMicros: absoluteToMicros(parsed.startDate, parsed.startTime),
+              endMicros: absoluteToMicros(parsed.endDate, parsed.endTime),
+            };
       }
-      return true;
-    };
 
-    // Applies a single pasted date-time value to whichever side of the current
-    // range it sits closer to — e.g. a range of 5:00-10:00 pasted with 7:00
-    // becomes 7:00-10:00 (closer to start), while 13:00 becomes 5:00-13:00
-    // (closer to end). There's no cursor/selection to anchor a side to
-    // without a text field, so proximity is the next best signal of intent.
-    const applySingleDateTime = (parsed: ParsedSingleDateTime) => {
+      const single: ParsedSingleDateTime | null = parseSingleDateTime(text);
+      if (!single) return null;
+
       const micros =
-        parsed.type === "timestamp"
-          ? parsed.micros
-          : absoluteToMicros(parsed.date, parsed.time ?? "00:00:00");
+        single.type === "timestamp"
+          ? single.micros
+          : absoluteToMicros(single.date, single.time ?? "00:00:00");
 
       const { startTime: baseStart, endTime: baseEnd } = getConsumableDateTime();
       const isCloserToStart = Math.abs(micros - baseStart) <= Math.abs(micros - baseEnd);
-      finalizeAbsoluteRange(
-        isCloserToStart ? micros : baseStart,
-        isCloserToStart ? baseEnd : micros,
-      );
+      return isCloserToStart
+        ? { startMicros: micros, endMicros: baseEnd }
+        : { startMicros: baseStart, endMicros: micros };
     };
 
-    // Tries a full range first, then a single value applied to both sides.
     const applyPastedText = (text: string): boolean => {
-      if (applyParsedRange(text)) return true;
-
-      const single = parseSingleDateTime(text);
-      if (!single) return false;
-
-      applySingleDateTime(single);
+      const resolved = resolveRangeText(text);
+      if (!resolved) return false;
+      finalizeAbsoluteRange(resolved.startMicros, resolved.endMicros);
       return true;
     };
 
@@ -1055,8 +1168,84 @@ export default defineComponent({
       }
     };
 
-    const timezoneFilterFn = (val: string, update: (cb: () => void) => void) => {
-      filteredTimezone.value = filterColumns(timezoneOptions, val, update);
+    // ----- Inline editing of the applied range --------------------------------
+    // In absolute mode the trigger's label IS a text field: the same formats the
+    // paste button accepts can be typed straight into it, so the window in force
+    // can be adjusted without opening the panel. Enter (or blur) applies, Escape
+    // reverts, ArrowDown opens the panel.
+    const rangeInputRef = ref<HTMLInputElement | null>(null);
+    const isRangeEditing = ref(false);
+    const rangeInputDraft = ref("");
+
+    const isRangeEditable = computed(() => selectedType.value === "absolute" && !props.disable);
+
+    const rangeInputText = computed({
+      // Until the user types, the field mirrors the range actually in force; the
+      // draft takes over mid-edit so applied-value updates don't fight the caret.
+      get: () => (isRangeEditing.value ? rangeInputDraft.value : triggerLabel.value),
+      set: (value: string) => {
+        isRangeEditing.value = true;
+        rangeInputDraft.value = value;
+      },
+    });
+
+    // An `<input>` has no intrinsic width in a flex row, so the trigger would clip
+    // the range instead of growing to it (as the plain label used to). `size` gives
+    // it a content-based base width; `min-w-0` still lets it shrink when cramped.
+    const rangeInputSize = computed(() => Math.max(12, rangeInputText.value.length));
+
+    const discardRangeDraft = () => {
+      isRangeEditing.value = false;
+      rangeInputDraft.value = "";
+    };
+
+    const commitRangeInput = (): boolean => {
+      if (!isRangeEditing.value) return true;
+
+      const text = rangeInputDraft.value.trim();
+      const unchanged = !text || text === triggerLabel.value;
+      discardRangeDraft();
+      if (unchanged) return true;
+
+      const resolved = resolveRangeText(text);
+      if (!resolved) {
+        toast({ variant: "error", message: t("common.dateRangePasteError") });
+        return false;
+      }
+
+      selectedType.value = "absolute";
+      // Deliberately NOT setAbsoluteTime: this is a user edit, so the resulting
+      // emit must keep userChangedValue=true (consumers re-run their query on it).
+      setSelectionFromMicros(resolved.startMicros, resolved.endMicros);
+      // With autoApply the deep selection watcher emits for us; without it, a typed
+      // range is an explicit action, so apply it instead of waiting for Apply.
+      if (!props.autoApply) saveDate(null);
+      return true;
+    };
+
+    const onRangeInputKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (commitRangeInput()) menuOpen.value = false;
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        discardRangeDraft();
+        rangeInputRef.value?.blur();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        menuOpen.value = true;
+      }
+    };
+
+    const onRangeInputBlur = () => {
+      commitRangeInput();
+    };
+
+    const timezoneFilterFn = (val: string, update: (cb: () => void) => void) => {      filteredTimezone.value = filterColumns(timezoneOptions, val, update);
     };
 
     const filterColumns = (options: any[], val: String, update: Function) => {
@@ -1233,6 +1422,15 @@ export default defineComponent({
         });
 
         if (props.queryRangeRestrictionInHour > 0) {
+          // "today" can span up to 24h; drop to the largest allowed hour window
+          // when the restriction is tighter than that.
+          if (isTodayPeriod.value) {
+            if (props.queryRangeRestrictionInHour < 24) {
+              setRelativeDate("h", props.queryRangeRestrictionInHour);
+            }
+            return;
+          }
+
           const maxRelativeValue = relativePeriodsMaxValue.value[relativePeriod.value];
 
           try {
@@ -1291,6 +1489,11 @@ export default defineComponent({
       getImageURL,
       onCustomPeriodSelect,
       setRelativeDate,
+      isTodayItem,
+      isTodayPeriod,
+      customPeriod,
+      isRelativeItemSelected,
+      onRelativeItemClick,
       relativePeriods,
       relativeDates,
       saveDate,
@@ -1303,6 +1506,14 @@ export default defineComponent({
       getPeriodLabel,
       displayValue,
       triggerLabel,
+      isRangeEditable,
+      rangeInputRef,
+      rangeInputText,
+      rangeInputSize,
+      onRangeInputKeydown,
+      onRangeInputBlur,
+      commitRangeInput,
+      resolveRangeText,
       copyRange,
       pasteRange,
       refresh,

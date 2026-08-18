@@ -16,6 +16,8 @@
 import { format as dfFormat, sub } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { DateTime as _DateTime } from "luxon";
+import { useLocalTimezone } from "@/utils/storage";
+import { resolveBrowserTimezone } from "@/utils/timezone";
 
 // ---------------------------------------------------------------------------
 // Duration helpers
@@ -192,7 +194,40 @@ export const getDurationObjectFromParams = (params: any) => {
   return obj;
 };
 
+/**
+ * The one relative period that is NOT a duration: "today" means midnight of the
+ * current day (in the user's selected display timezone) up to now, so its length
+ * changes as the day goes on. Kept as its own token — rather than something like
+ * `0d` — so any consumer that regex-parses `<number><unit>` simply doesn't match
+ * instead of silently resolving to an empty window.
+ */
+export const TODAY_RELATIVE_PERIOD = "today";
+
+export const isTodayRelativePeriod = (period?: string | null): boolean =>
+  typeof period === "string" && period.trim().toLowerCase() === TODAY_RELATIVE_PERIOD;
+
+/**
+ * Resolves the "today" window: start of the current day → now.
+ *
+ * The day boundary is timezone-dependent, so it is anchored to the timezone the
+ * user picked in the date-time picker (persisted in local storage, mirrored into
+ * the vuex store), falling back to the browser timezone.
+ */
+export const getTodayTimeRange = (timezone?: string) => {
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const zone = resolveBrowserTimezone(timezone || useLocalTimezone() || browserZone);
+  const zoned = _DateTime.now().setZone(zone);
+  const startOfDay = (zoned.isValid ? zoned : _DateTime.now()).startOf("day");
+
+  return {
+    startTime: startOfDay.toMillis() * 1000,
+    endTime: Date.now() * 1000,
+  };
+};
+
 export const getConsumableRelativeTime = (period: string) => {
+  if (isTodayRelativePeriod(period)) return getTodayTimeRange();
+
   const periodString = period?.match(/(\d+)([smhdwM])/);
   if (periodString) {
     let periodValue: number = parseInt(periodString[1]);

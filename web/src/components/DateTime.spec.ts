@@ -33,6 +33,9 @@ vi.mock("@/utils/date", () => ({
 
 vi.mock("date-fns-tz", () => ({
   toZonedTime: vi.fn((date) => new Date(date)),
+  // Wall-clock string → instant. The picker's timezone is irrelevant here: the
+  // mock treats the string as local time, which round-trips with toZonedTime.
+  fromZonedTime: vi.fn((iso) => new Date(iso)),
 }));
 
 describe("DateTime Component", () => {
@@ -533,6 +536,177 @@ describe("DateTime Component", () => {
       expect(wrapper.vm.relativePeriod).toBe("h");
       expect(wrapper.vm.relativeValue).toBe(2);
       expect(wrapper.emitted("on:date-change")).toBeTruthy();
+    });
+  });
+
+  describe("Today relative preset", () => {
+    // timestampToTimezoneDate is mocked to "2025/01/01", and fromZonedTime treats
+    // that wall-clock date as local time, so midnight is deterministic here.
+    const expectedTodayStart = new Date("2025-01-01T00:00:00").getTime() * 1000;
+
+    it("offers Today as the first Days preset and drops the 6-day one", () => {
+      wrapper = createWrapper();
+
+      expect(wrapper.vm.relativeDates.d[0]).toBe("today");
+      expect(wrapper.vm.relativeDates.d).toEqual(["today", 1, 2, 3, 4, 5]);
+      // Restriction gating treats Today as a ≤24h window, same as 1 day.
+      expect(wrapper.vm.relativeDatesInHour.d).toEqual([24, 24, 48, 72, 96, 120]);
+    });
+
+    it("resolves Today to midnight → now, tagged with the 'today' period", () => {
+      wrapper = createWrapper();
+
+      wrapper.vm.onRelativeItemClick("d", "today");
+
+      expect(wrapper.vm.selectedType).toBe("relative");
+      expect(wrapper.vm.relativePeriod).toBe("today");
+
+      const range = wrapper.vm.getConsumableDateTime();
+      expect(range.relativeTimePeriod).toBe("today");
+      expect(range.startTime).toBe(expectedTodayStart);
+      expect(range.endTime).toBeGreaterThan(range.startTime);
+    });
+
+    it("labels the trigger 'Today' instead of a Past-N duration", () => {
+      wrapper = createWrapper();
+
+      wrapper.vm.onRelativeItemClick("d", "today");
+
+      expect(wrapper.vm.getDisplayValue).toBe("Today");
+    });
+
+    it("marks only the Today cell selected while it is active", () => {
+      wrapper = createWrapper();
+
+      wrapper.vm.onRelativeItemClick("d", "today");
+      expect(wrapper.vm.isRelativeItemSelected("d", "today")).toBe(true);
+      expect(wrapper.vm.isRelativeItemSelected("d", 1)).toBe(false);
+
+      wrapper.vm.setRelativeDate("d", 1);
+      expect(wrapper.vm.isRelativeItemSelected("d", "today")).toBe(false);
+      expect(wrapper.vm.isRelativeItemSelected("d", 1)).toBe(true);
+    });
+
+    it("restores the Today preset from a saved / URL period", () => {
+      wrapper = createWrapper();
+
+      wrapper.vm.setRelativeTime("today");
+      expect(wrapper.vm.relativePeriod).toBe("today");
+      expect(wrapper.vm.getConsumableDateTime().relativeTimePeriod).toBe("today");
+    });
+
+    it("falls back to Days when the custom row is edited from Today", () => {
+      wrapper = createWrapper();
+
+      wrapper.vm.onRelativeItemClick("d", "today");
+      wrapper.vm.relativeValue = 3;
+      wrapper.vm.onCustomPeriodSelect();
+
+      expect(wrapper.vm.relativePeriod).toBe("d");
+      expect(wrapper.vm.getConsumableDateTime().relativeTimePeriod).toBe("3d");
+    });
+
+    it("emits the Today range on click when autoApply is on", async () => {
+      wrapper = createWrapper({ autoApply: true });
+      await wrapper.vm.$nextTick();
+      store.state.savedViewFlag = false;
+
+      wrapper.vm.onRelativeItemClick("d", "today");
+      await wrapper.vm.$nextTick();
+
+      const events = wrapper.emitted("on:date-change");
+      const payload = events[events.length - 1][0];
+      expect(payload.relativeTimePeriod).toBe("today");
+      expect(payload.startTime).toBe(expectedTodayStart);
+    });
+  });
+
+  describe("Inline editing of the absolute range", () => {
+    it("is editable only for an absolute range on an enabled picker", () => {
+      wrapper = createWrapper();
+
+      expect(wrapper.vm.isRangeEditable).toBe(false);
+
+      wrapper.vm.selectedType = "absolute";
+      expect(wrapper.vm.isRangeEditable).toBe(true);
+    });
+
+    it("is not editable while the picker is disabled", () => {
+      wrapper = createWrapper({ disable: true, defaultType: "absolute" });
+
+      expect(wrapper.vm.isRangeEditable).toBe(false);
+    });
+
+    it("mirrors the applied range until the user types", () => {
+      wrapper = createWrapper({ defaultType: "absolute" });
+
+      expect(wrapper.vm.rangeInputText).toBe(wrapper.vm.triggerLabel);
+    });
+
+    it("applies a typed absolute range", () => {
+      wrapper = createWrapper({ defaultType: "absolute" });
+
+      wrapper.vm.rangeInputText = "2023/01/02 01:00:00 - 2023/01/02 05:30:00";
+      expect(wrapper.vm.commitRangeInput()).toBe(true);
+
+      expect(wrapper.vm.selectedType).toBe("absolute");
+      expect(wrapper.vm.selectedDate.from).toBe("2023/01/02");
+      expect(wrapper.vm.selectedDate.to).toBe("2023/01/02");
+      expect(wrapper.vm.selectedTime.startTime).toBe("01:00:00");
+      expect(wrapper.vm.selectedTime.endTime).toBe("05:30:00");
+      // Draft handed back to the applied value.
+      expect(wrapper.vm.rangeInputText).toBe(wrapper.vm.triggerLabel);
+    });
+
+    it("emits a user-initiated change for a typed range when autoApply is off", async () => {
+      wrapper = createWrapper({ defaultType: "absolute" });
+      await wrapper.vm.$nextTick();
+      store.state.savedViewFlag = false;
+
+      wrapper.vm.rangeInputText = "2023/01/02 01:00:00 - 2023/01/02 05:30:00";
+      wrapper.vm.commitRangeInput();
+      await wrapper.vm.$nextTick();
+
+      const events = wrapper.emitted("on:date-change");
+      const payload = events[events.length - 1][0];
+      // Consumers re-run their query only when the change came from the user.
+      expect(payload.userChangedValue).toBe(true);
+      expect(payload.relativeTimePeriod).toBeNull();
+    });
+
+    it("rejects unparseable text and keeps the applied range", () => {
+      wrapper = createWrapper({ defaultType: "absolute" });
+
+      wrapper.vm.rangeInputText = "2023/01/02 01:00:00 - 2023/01/02 05:30:00";
+      wrapper.vm.commitRangeInput();
+      const applied = wrapper.vm.triggerLabel;
+
+      wrapper.vm.rangeInputText = "not a range";
+      expect(wrapper.vm.commitRangeInput()).toBe(false);
+
+      expect(wrapper.vm.triggerLabel).toBe(applied);
+      expect(wrapper.vm.rangeInputText).toBe(applied);
+    });
+
+    it("moves the nearer edge when a single date-time is typed", () => {
+      wrapper = createWrapper({ defaultType: "absolute" });
+
+      wrapper.vm.rangeInputText = "2023/01/02 01:00:00 - 2023/01/02 11:00:00";
+      wrapper.vm.commitRangeInput();
+
+      wrapper.vm.rangeInputText = "2023/01/02 10:00:00";
+      expect(wrapper.vm.commitRangeInput()).toBe(true);
+
+      expect(wrapper.vm.selectedTime.startTime).toBe("01:00:00");
+      expect(wrapper.vm.selectedTime.endTime).toBe("10:00:00");
+    });
+
+    it("treats an untouched field as a no-op", () => {
+      wrapper = createWrapper({ defaultType: "absolute" });
+      const applied = wrapper.vm.triggerLabel;
+
+      expect(wrapper.vm.commitRangeInput()).toBe(true);
+      expect(wrapper.vm.triggerLabel).toBe(applied);
     });
   });
 });

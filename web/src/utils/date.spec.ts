@@ -14,12 +14,14 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import { describe, it, expect } from "vitest";
+import { DateTime } from "luxon";
 import {
   parseDuration,
   generateDurationLabel,
   getQueryParamsForDuration,
   getDurationObjectFromParams,
   getConsumableRelativeTime,
+  getTodayTimeRange,
   getRelativePeriod,
   isInvalidDate,
   convertUnixToDateFormat,
@@ -359,6 +361,44 @@ describe("Date Utilities", () => {
     it("should return undefined for empty period", () => {
       const result = getConsumableRelativeTime("");
       expect(result).toBeUndefined();
+    });
+
+    it("resolves the 'today' token to start-of-day → now", () => {
+      const result = getConsumableRelativeTime("today");
+
+      expect(result).toBeDefined();
+      expect(result?.startTime).toBe(getTodayTimeRange().startTime);
+      expect(result?.endTime).toBeGreaterThanOrEqual(result!.startTime);
+      // Never wider than a day.
+      expect(result!.endTime - result!.startTime).toBeLessThanOrEqual(24 * 3600 * 1_000_000);
+    });
+
+    it("accepts the 'today' token case-insensitively and with padding", () => {
+      expect(getConsumableRelativeTime(" Today ")?.startTime).toBe(getTodayTimeRange().startTime);
+    });
+  });
+
+  describe("getTodayTimeRange", () => {
+    it("anchors the day boundary to the given timezone", () => {
+      const tokyo = getTodayTimeRange("Asia/Tokyo");
+      const utc = getTodayTimeRange("UTC");
+
+      expect(tokyo.startTime).toBe(
+        DateTime.now().setZone("Asia/Tokyo").startOf("day").toMillis() * 1000,
+      );
+      expect(utc.startTime).toBe(DateTime.now().setZone("UTC").startOf("day").toMillis() * 1000);
+    });
+
+    it("resolves a 'Browser Time (Zone)' label to the zone it names", () => {
+      expect(getTodayTimeRange("Browser Time (Asia/Tokyo)").startTime).toBe(
+        getTodayTimeRange("Asia/Tokyo").startTime,
+      );
+    });
+
+    it("falls back to a valid window for an unknown timezone", () => {
+      const result = getTodayTimeRange("Not/AZone");
+      expect(Number.isFinite(result.startTime)).toBe(true);
+      expect(result.endTime).toBeGreaterThanOrEqual(result.startTime);
     });
   });
 
