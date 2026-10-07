@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import { addLabelToPromQlQuery } from "@/utils/query/promQLUtils";
+import { addLabelToPromQlQuery, escapePromqlRegexValue } from "@/utils/query/promQLUtils";
 import { addLabelsToSQlQuery, getStreamFromQuery } from "@/utils/query/sqlUtils";
 import {
   formatInterval,
@@ -51,7 +51,7 @@ export const usePanelVariableSubstitution = ({
             ?.filter((it: any) => it.type != "dynamic_filters") // ad hoc filters are not considered as dependent filters as they are globally applied
             ?.filter((it: any) => {
               const regexForVariable = new RegExp(
-                `(?:\\$\\{?\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|doublequote|singlequote)\\s*)?\\}?)|(?:\\{\\{\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|doublequote|singlequote)\\s*)?\\}\\})`,
+                `(?:\\$\\{?\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|regex|doublequote|singlequote)\\s*)?\\}?)|(?:\\{\\{\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|regex|doublequote|singlequote)\\s*)?\\}\\})`,
               );
 
               return panelSchema.value.queries
@@ -87,7 +87,7 @@ export const usePanelVariableSubstitution = ({
       ?.filter((it: any) => it.type != "dynamic_filters") // ad hoc filters are not considered as dependent filters as they are globally applied
       ?.filter((it: any) => {
         const regexForVariable = new RegExp(
-          `(?:\\$\\{?\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|doublequote|singlequote)\\s*)?\\}?)|(?:\\{\\{\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|doublequote|singlequote)\\s*)?\\}\\})`,
+          `(?:\\$\\{?\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|regex|doublequote|singlequote)\\s*)?\\}?)|(?:\\{\\{\\s*${it.name}\\s*(?::\\s*(?:csv|pipe|regex|doublequote|singlequote)\\s*)?\\}\\})`,
         );
 
         return panelSchema.value.queries
@@ -501,6 +501,15 @@ export const usePanelVariableSubstitution = ({
                   `'${variable.escapeSingleQuotes ? escapeSingleQuotes(value) : value}'`,
               )
               .join(",") || "''";
+          // In PromQL a multi-value variable is consumed by a `=~"$var"`
+          // matcher, so every picked value is a literal that must not be read
+          // as a pattern. An APISIX `matched_uri` of `/api*` would otherwise
+          // become `^/api*$` and match nothing. `:pipe` and `:csv` stay raw as
+          // the escape hatch for users who really do supply regex fragments.
+          const regexAlternation = valueToUse
+            .map((v: any) => escapePromqlRegexValue(v))
+            .join("|");
+          const defaultValue = queryType === "sql" ? value : regexAlternation;
           const possibleVariablesPlaceHolderTypes = [
             // Mustache forms
             {
@@ -512,6 +521,10 @@ export const usePanelVariableSubstitution = ({
               value: valueToUse.join("|"),
             },
             {
+              placeHolder: `{{${variable.name}:regex}}`,
+              value: regexAlternation,
+            },
+            {
               placeHolder: `{{${variable.name}:doublequote}}`,
               value: valueToUse.map((value: any) => `"${value}"`).join(",") || '""',
             },
@@ -521,7 +534,7 @@ export const usePanelVariableSubstitution = ({
             },
             {
               placeHolder: `{{${variable.name}}}`,
-              value: queryType === "sql" ? value : valueToUse.join("|"),
+              value: defaultValue,
             },
             // Dollar-sign forms (existing)
             {
@@ -533,6 +546,10 @@ export const usePanelVariableSubstitution = ({
               value: valueToUse.join("|"),
             },
             {
+              placeHolder: `\${${variable.name}:regex}`,
+              value: regexAlternation,
+            },
+            {
               placeHolder: `\${${variable.name}:doublequote}`,
               value: valueToUse.map((value: any) => `"${value}"`).join(",") || '""',
             },
@@ -542,11 +559,11 @@ export const usePanelVariableSubstitution = ({
             },
             {
               placeHolder: `\${${variable.name}}`,
-              value: queryType === "sql" ? value : valueToUse.join("|"),
+              value: defaultValue,
             },
             {
               placeHolder: `$${variable.name}`,
-              value: queryType === "sql" ? value : valueToUse.join("|"),
+              value: defaultValue,
             },
           ];
 
@@ -565,6 +582,24 @@ export const usePanelVariableSubstitution = ({
           const valueToUse = variable.value === null ? SELECT_ALL_VALUE : variable.value;
           variableValue = `${variable.escapeSingleQuotes ? escapeSingleQuotes(valueToUse) : valueToUse}`;
           const mustachePlaceholder = `{{${variable.name}}}`;
+
+          // A multi-select variable can still hold a single scalar (one value
+          // picked, or a value carried over from an imported dashboard). It is
+          // written for `=~"$var"` all the same, so it needs the same regex
+          // escaping as the array branch — this is the case behind #13877,
+          // where an APISIX `matched_uri` of `/api*` was sent unescaped and
+          // `^/api*$` matched nothing. Mirrors Grafana's rule of escaping only
+          // when the variable is multi / include-all; a plain single-select
+          // variable is left alone because it may legitimately expand to a
+          // duration, a label name, or a hand-written pattern.
+          const isRegexContext =
+            queryType !== "sql" &&
+            (variable.multiSelect === true ||
+              variable.selectAllValueForMultiSelect === "all");
+          const promqlRegexValue = isRegexContext
+            ? escapePromqlRegexValue(valueToUse)
+            : variableValue;
+
           if (
             query.includes(variableName) ||
             query.includes(variableNameWithBrackets) ||
@@ -584,11 +619,19 @@ export const usePanelVariableSubstitution = ({
           // For singlequote form, the variable value will be wrapped with single quotes.
           query = query.replaceAll(`{{${variable.name}:csv}}`, variableValue);
           query = query.replaceAll(`{{${variable.name}:pipe}}`, variableValue);
+          query = query.replaceAll(
+            `{{${variable.name}:regex}}`,
+            escapePromqlRegexValue(valueToUse),
+          );
           query = query.replaceAll(`{{${variable.name}:doublequote}}`, variableValue);
           query = query.replaceAll(`{{${variable.name}:singlequote}}`, variableValue);
-          query = query.replaceAll(mustachePlaceholder, variableValue);
-          query = query.replaceAll(variableNameWithBrackets, variableValue);
-          query = query.replaceAll(variableName, variableValue);
+          query = query.replaceAll(mustachePlaceholder, promqlRegexValue);
+          query = query.replaceAll(
+            `\${${variable.name}:regex}`,
+            escapePromqlRegexValue(valueToUse),
+          );
+          query = query.replaceAll(variableNameWithBrackets, promqlRegexValue);
+          query = query.replaceAll(variableName, promqlRegexValue);
         }
       });
 

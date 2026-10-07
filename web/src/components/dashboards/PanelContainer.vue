@@ -805,7 +805,7 @@ export default defineComponent({
     };
     const createVariableRegex = (name: any) =>
       new RegExp(
-        `(?:\\$\\{?\\s*${name}\\s*(?::\\s*(?:csv|pipe|doublequote|singlequote)\\s*)?\\}?)|(?:\\{\\{\\s*${name}\\s*(?::\\s*(?:csv|pipe|doublequote|singlequote)\\s*)?\\}\\})`,
+        `(?:\\$\\{?\\s*${name}\\s*(?::\\s*(?:csv|pipe|regex|doublequote|singlequote)\\s*)?\\}?)|(?:\\{\\{\\s*${name}\\s*(?::\\s*(?:csv|pipe|regex|doublequote|singlequote)\\s*)?\\}\\})`,
       );
 
     const getDependentVariablesData = () =>

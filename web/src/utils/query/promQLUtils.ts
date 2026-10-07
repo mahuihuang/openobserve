@@ -41,13 +41,55 @@ export const parsePromQlQuery = (query: string) => {
   return meta;
 };
 
+/**
+ * Escape a value so it survives being embedded in a PromQL double-quoted
+ * string literal. Backslashes go first, or the ones this function introduces
+ * would be escaped a second time.
+ */
+export const escapePromqlStringLiteral = (value: any): string =>
+  String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
+
+/**
+ * Escape a *literal* label value that is about to become the pattern of a
+ * `=~` / `!~` matcher.
+ *
+ * Prometheus anchors regex matchers (`^(?:...)$`), so metacharacters in the
+ * value change what it means: an APISIX `matched_uri` of `/api*` becomes
+ * `^/api*$`, i.e. "/ap followed by zero or more i" — which never matches the
+ * literal `/api*` the label actually holds. Grafana's Prometheus datasource
+ * solves this with `prometheusSpecialRegexEscape`; this is the equivalent.
+ *
+ * The result is double-escaped on purpose: the regex needs `\*`, and the
+ * PromQL string literal needs that backslash doubled, so the emitted query
+ * text reads `=~"/api\\*"`.
+ *
+ * Only call this where the value is known to be a concrete label value — never
+ * on a hand-written query, where metacharacters are intentional.
+ */
+export const escapePromqlRegexValue = (value: any): string =>
+  escapePromqlStringLiteral(String(value ?? "").replace(/[\\^$*+?.()|[\]{}]/g, "\\$&"));
+
+export const isPromqlRegexOperator = (operator: any): boolean =>
+  operator === "=~" || operator === "!~";
+
 export const addLabelToPromQlQuery = (
   originalQuery: any,
   label: any,
   value: any,
   operator: any,
 ) => {
-  const conditionToAdd = value ? `${label}${operator}"${value}"` : `${label}`;
+  // With `=~` / `!~` the ad-hoc filter UI lets the user type a pattern, so the
+  // value is passed through verbatim — escaping it would make the operator
+  // useless. With `=` / `!=` the value is a literal, so quote it: an unescaped
+  // `"` would otherwise close the string and produce an unparseable query.
+  const escapedValue = isPromqlRegexOperator(operator)
+    ? value
+    : escapePromqlStringLiteral(value);
+
+  const conditionToAdd = value ? `${label}${operator}"${escapedValue}"` : `${label}`;
 
   try {
     const parsedQuery = parsePromQlQuery(originalQuery);

@@ -560,3 +560,118 @@ describe("$__percentile_interval", () => {
     }
   });
 });
+
+// ─── PromQL regex matcher escaping (#13877) ──────────────────────────────────
+
+describe("replaceQueryValue – PromQL regex matcher escaping (#13877)", () => {
+  // An APISIX `matched_uri` label literally holds the route pattern, so values
+  // like `/api*` contain regex metacharacters. Prometheus anchors `=~` as
+  // `^...$`, so an unescaped `/api*` becomes `^/api*$` and matches nothing.
+  const makeInst = (value: any, extra: Record<string, any> = {}) => {
+    const varValues = [
+      {
+        name: "uri",
+        type: "query_values",
+        value,
+        multiSelect: true,
+        escapeSingleQuotes: false,
+        isVariablePartialLoaded: true,
+        ...extra,
+      },
+    ];
+    return usePanelVariableSubstitution({
+      panelSchema: makePanelSchema([{ query: 'metric{matched_uri=~"$uri"}' }]),
+      variablesData: makeVariablesData(varValues),
+      chartPanelRef: makeChartPanelRef(),
+      store: makeStore(),
+      log,
+    });
+  };
+
+  const substitute = (inst: any, q: string, queryType = "promql") =>
+    inst.replaceQueryValue(q, 0, 300_000_000, queryType).query;
+
+  it("escapes a single multi-select value holding a wildcard route", () => {
+    const inst = makeInst("/api*");
+    // Emitted text needs `\\*` so the PromQL string literal yields regex `\*`
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe(
+      'metric{matched_uri=~"/api\\\\*"}',
+    );
+  });
+
+  it.each([
+    ["/api*", "/api\\\\*"],
+    ["/*", "/\\\\*"],
+    ["/admin*", "/admin\\\\*"],
+  ])("escapes wildcard route %s", (value, expected) => {
+    const inst = makeInst(value);
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe(
+      `metric{matched_uri=~"${expected}"}`,
+    );
+  });
+
+  it("leaves a metacharacter-free value byte-identical", () => {
+    const inst = makeInst("/ws");
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe('metric{matched_uri=~"/ws"}');
+  });
+
+  it("escapes every value of a multi-value selection and joins with |", () => {
+    const inst = makeInst(["/api*", "/ws"]);
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe(
+      'metric{matched_uri=~"/api\\\\*|/ws"}',
+    );
+  });
+
+  it("escapes a dot so it cannot match an unselected neighbour", () => {
+    // `/v1.0/ping` unescaped also matches `/v1x0/ping`
+    const inst = makeInst(["/v1.0/ping"]);
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe(
+      'metric{matched_uri=~"/v1\\\\.0/ping"}',
+    );
+  });
+
+  it("escapes ${var} and {{var}} forms too", () => {
+    const inst = makeInst("/api*");
+    expect(substitute(inst, 'metric{matched_uri=~"${uri}"}')).toBe(
+      'metric{matched_uri=~"/api\\\\*"}',
+    );
+    expect(substitute(inst, 'metric{matched_uri=~"{{uri}}"}')).toBe(
+      'metric{matched_uri=~"/api\\\\*"}',
+    );
+  });
+
+  it("leaves :pipe raw as the escape hatch for hand-written patterns", () => {
+    const inst = makeInst(["/api*", "/ws"]);
+    expect(substitute(inst, 'metric{matched_uri=~"${uri:pipe}"}')).toBe(
+      'metric{matched_uri=~"/api*|/ws"}',
+    );
+  });
+
+  it("escapes via the explicit :regex format", () => {
+    const inst = makeInst("/api*");
+    expect(substitute(inst, 'metric{matched_uri=~"${uri:regex}"}')).toBe(
+      'metric{matched_uri=~"/api\\\\*"}',
+    );
+  });
+
+  it("does not escape a plain single-select variable", () => {
+    // It may legitimately expand to a duration, a label name or a pattern
+    const inst = makeInst("/api*", { multiSelect: false });
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe('metric{matched_uri=~"/api*"}');
+  });
+
+  it("escapes when select-all is configured even without multiSelect", () => {
+    const inst = makeInst("/api*", {
+      multiSelect: false,
+      selectAllValueForMultiSelect: "all",
+    });
+    expect(substitute(inst, 'metric{matched_uri=~"$uri"}')).toBe(
+      'metric{matched_uri=~"/api\\\\*"}',
+    );
+  });
+
+  it("does not regex-escape for SQL queries", () => {
+    const inst = makeInst("/api*");
+    expect(substitute(inst, "SELECT * WHERE uri = '$uri'", "sql")).toContain("/api*");
+  });
+});
