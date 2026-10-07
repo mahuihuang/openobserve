@@ -48,6 +48,17 @@ pub fn metric_name(selector: &VectorSelector) -> Option<String> {
         .map(|mat| mat.value)
 }
 
+/// Anchor a label matcher's pattern the way Prometheus does.
+///
+/// The group is not optional: `^a|b$` anchors only the FIRST alternative at the
+/// start and only the LAST one at the end, so `environment=~"prod|dev"` would
+/// match `production` and `my-dev`. A multi-value dashboard variable expands to
+/// exactly such an alternation, so without the group every multi-select PromQL
+/// panel silently over-matches.
+fn anchor_matcher_regex(pattern: &str) -> String {
+    format!("^(?:{pattern})$")
+}
+
 /// Build the DataFusion predicates used for PromQL label matchers.
 ///
 /// Keeping predicate construction separate lets storage-side secondary
@@ -78,7 +89,7 @@ pub fn matcher_predicates(schema: &Schema, matchers: &Matchers) -> Vec<Expr> {
             MatchOp::Equal => col(mat.name.clone()).eq(literal(mat.value.clone())),
             MatchOp::NotEqual => col(mat.name.clone()).not_eq(literal(mat.value.clone())),
             MatchOp::Re(regex) => {
-                let regex = format!("^{}$", regex.as_str());
+                let regex = anchor_matcher_regex(regex.as_str());
                 // DataFusion 54 can lower a regex on Utf8View to a mixed-type
                 // equality/LIKE expression. Cast only regex matchers until that
                 // optimizer bug is fixed; equality matchers stay zero-copy views.
@@ -90,7 +101,7 @@ pub fn matcher_predicates(schema: &Schema, matchers: &Matchers) -> Vec<Expr> {
                 regexp_like().call(vec![value, lit(regex)])
             }
             MatchOp::NotRe(regex) => {
-                let regex = format!("^{}$", regex.as_str());
+                let regex = anchor_matcher_regex(regex.as_str());
                 let value = if field_type == DataType::Utf8View {
                     cast(col(mat.name.clone()), DataType::Utf8)
                 } else {
@@ -419,4 +430,38 @@ mod tests {
             2
         );
     }
+
+    #[test]
+    fn test_anchor_matcher_regex_wraps_alternations_in_a_group() {
+        // `^a|b$` would anchor only the first alternative at the start and only
+        // the last one at the end, so a multi-value variable expanding to
+        // `prod|dev` would also match `production` and `my-dev`.
+        assert_eq!(anchor_matcher_regex("prod|dev"), "^(?:prod|dev)$");
+        assert_eq!(anchor_matcher_regex("api"), "^(?:api)$");
+        assert_eq!(anchor_matcher_regex(""), "^(?:)$");
+    }
+
+    #[test]
+    fn test_anchored_alternation_does_not_match_a_prefix() {
+        let re = regex::Regex::new(&anchor_matcher_regex("/ws|/zzz")).unwrap();
+        // the bug: with `^/ws|/zzz$` the first branch matched any value
+        // starting with `/ws`
+        assert!(!re.is_match("/wsx"));
+        assert!(!re.is_match("x/ws"));
+        assert!(re.is_match("/ws"));
+        assert!(re.is_match("/zzz"));
+    }
+
+    #[test]
+    fn test_anchored_alternation_keeps_literal_wildcards_exact() {
+        // APISIX route patterns: the label value itself contains `*`, so the
+        // frontend escapes it before building the matcher
+        let re = regex::Regex::new(&anchor_matcher_regex(r"/api\*|/\*")).unwrap();
+        assert!(re.is_match("/api*"));
+        assert!(re.is_match("/*"));
+        assert!(!re.is_match("/api"));
+        assert!(!re.is_match("/ws"));
+        assert!(!re.is_match("/api*extra"));
+    }
+
 }
