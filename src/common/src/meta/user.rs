@@ -176,7 +176,14 @@ pub fn get_roles() -> Vec<UserRole> {
 
 #[cfg(not(feature = "enterprise"))]
 pub fn get_roles() -> Vec<UserRole> {
-    vec![UserRole::Admin, UserRole::Root, UserRole::ServiceAccount]
+    vec![
+        UserRole::Root,
+        UserRole::Admin,
+        UserRole::Editor,
+        UserRole::Viewer,
+        UserRole::User,
+        UserRole::ServiceAccount,
+    ]
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -848,10 +855,13 @@ mod tests {
         // Non-enterprise mode should have specific roles
         #[cfg(not(feature = "enterprise"))]
         {
-            assert_eq!(roles.len(), 3);
+            assert_eq!(roles.len(), 6);
             assert!(roles.contains(&UserRole::Admin));
             assert!(roles.contains(&UserRole::Root));
             assert!(roles.contains(&UserRole::ServiceAccount));
+            assert!(roles.contains(&UserRole::Editor));
+            assert!(roles.contains(&UserRole::Viewer));
+            assert!(roles.contains(&UserRole::User));
         }
 
         // Enterprise mode uses iterator over all roles

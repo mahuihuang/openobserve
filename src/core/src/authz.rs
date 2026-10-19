@@ -158,11 +158,46 @@ pub async fn check_permissions(
 #[cfg(not(feature = "enterprise"))]
 pub async fn check_permissions(
     _user_id: &str,
-    _auth_info: AuthExtractor,
-    _role: UserRole,
+    auth_info: AuthExtractor,
+    role: UserRole,
     _is_external: bool,
 ) -> bool {
-    true
+    // Root and Admin have full access
+    if role.eq(&UserRole::Root) || role.eq(&UserRole::Admin) {
+        return true;
+    }
+
+    // ServiceAccount: allow all (access is controlled by token scope)
+    if role.eq(&UserRole::ServiceAccount) {
+        return true;
+    }
+
+    let method = auth_info.method.as_str();
+
+    // Editor: can read and write, but cannot delete
+    if role.eq(&UserRole::Editor) {
+        return method != "DELETE";
+    }
+
+    // Viewer: read-only access. POST-based search/query endpoints are already
+    // allowed earlier via `bypass_check` in the auth extractor.
+    if role.eq(&UserRole::Viewer) {
+        return method == "GET";
+    }
+
+    // SreAgent is a system-managed account that only ever gets provisioned by
+    // enterprise builds (`organization::ensure_sys_rca_agent` is
+    // `cfg(feature = "enterprise")`), and `check_role_available` rejects it as
+    // an API-assignable role. So an OSS build should never see it; deny rather
+    // than inherit ServiceAccount's blanket allow. Note that
+    // `UserRole::is_service_account()` returns true for SreAgent — do not fold
+    // this into the ServiceAccount branch above via that helper.
+    if role.eq(&UserRole::SreAgent) {
+        return false;
+    }
+
+    // User role: minimal access (login only, no API access)
+    false
 }
 
 pub async fn list_objects_for_user(
@@ -172,4 +207,76 @@ pub async fn list_objects_for_user(
     object_type: &str,
 ) -> anyhow::Result<Option<Vec<String>>> {
     db::authz::list_objects_for_user(org_id, user_id, permission, object_type).await
+}
+
+#[cfg(all(test, not(feature = "enterprise")))]
+mod tests {
+    use config::meta::user::UserRole;
+
+    use super::check_permissions;
+    use crate::auth::AuthExtractor;
+
+    fn extractor(method: &str) -> AuthExtractor {
+        AuthExtractor {
+            auth: String::new(),
+            method: method.to_string(),
+            o2_type: "dashboard:default".to_string(),
+            org_id: "default".to_string(),
+            bypass_check: false,
+            parent_id: String::new(),
+            use_all_org: false,
+            use_self_context: false,
+            use_self_parent: false,
+        }
+    }
+
+    async fn allowed(role: UserRole, method: &str) -> bool {
+        check_permissions("user@example.com", extractor(method), role, false).await
+    }
+
+    const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+    #[tokio::test]
+    async fn root_admin_and_service_account_have_full_access() {
+        for role in [UserRole::Root, UserRole::Admin, UserRole::ServiceAccount] {
+            for method in METHODS {
+                assert!(
+                    allowed(role.clone(), method).await,
+                    "{role} should be allowed {method}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn editor_can_read_and_write_but_not_delete() {
+        for method in ["GET", "POST", "PUT", "PATCH"] {
+            assert!(allowed(UserRole::Editor, method).await, "editor {method}");
+        }
+        assert!(!allowed(UserRole::Editor, "DELETE").await);
+    }
+
+    #[tokio::test]
+    async fn viewer_is_read_only() {
+        assert!(allowed(UserRole::Viewer, "GET").await);
+        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+            assert!(!allowed(UserRole::Viewer, method).await, "viewer {method}");
+        }
+    }
+
+    #[tokio::test]
+    async fn user_role_has_no_api_access() {
+        for method in METHODS {
+            assert!(!allowed(UserRole::User, method).await, "user {method}");
+        }
+    }
+
+    /// SreAgent is enterprise-provisioned only; an OSS build must not inherit
+    /// ServiceAccount's blanket allow for it.
+    #[tokio::test]
+    async fn sre_agent_is_denied() {
+        for method in METHODS {
+            assert!(!allowed(UserRole::SreAgent, method).await, "sre {method}");
+        }
+    }
 }

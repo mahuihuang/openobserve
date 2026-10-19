@@ -41,6 +41,212 @@ use {
 
 pub const V2_API_PREFIX: &str = "v2";
 
+/// Normalize a request URI path into the shape the permission layer matches on:
+/// `{org_id}/...` for API routes, `node/...` / `auth/...` for the handful of
+/// routes mounted outside `/api`.
+///
+/// Strips, in order: the configured `base_uri`, the leading `/`, and the `api/`
+/// prefix. Doing `base_uri` separately (rather than matching the combined
+/// `{base_uri}/api/` in one shot) is what keeps non-`/api` routes stable under a
+/// non-empty `base_uri` — otherwise `GET /openobserve/node/status` normalizes to
+/// `openobserve/node/status` and the first segment reads as an org named
+/// "openobserve".
+#[cfg(not(feature = "enterprise"))]
+fn normalize_request_path<'a>(local_path: &'a str, base_uri: &str) -> &'a str {
+    let path = if base_uri.is_empty() || base_uri == "/" {
+        local_path
+    } else {
+        local_path.strip_prefix(base_uri).unwrap_or(local_path)
+    };
+    let path = path.strip_prefix('/').unwrap_or(path);
+    path.strip_prefix("api/").unwrap_or(path)
+}
+
+/// A single segment pattern in a bypass-route shape.
+#[cfg(not(feature = "enterprise"))]
+#[derive(Clone, Copy)]
+enum Seg {
+    /// Matches this exact segment.
+    Lit(&'static str),
+    /// Matches any single non-empty segment (org id, stream name, alert id, ...).
+    Param,
+}
+
+/// Routes that must skip the role check in `authz::check_permissions`, matched
+/// on **method + exact segment shape**.
+///
+/// Exact shapes, not `path.contains("keyword")`: a substring test is matched by
+/// user-controlled path segments too, so a stream/dashboard/function/KV key —
+/// or an org — merely *named* like a bypass keyword would silently skip the
+/// role check on every verb, including DELETE. That is the same defect class as
+/// GHSA-wffq-g8qf-ccmv, which `ingestion_routes` already hardened against.
+///
+/// Scope: POST only. `bypass_check` exists solely for endpoints whose HTTP
+/// method cannot express their real intent — reads that must use POST to carry
+/// a query body. GET reads need no entry here: `check_permissions` already
+/// allows GET for Viewer, and the `User` role is defined as login-only, so it
+/// is *meant* to be denied them.
+#[cfg(not(feature = "enterprise"))]
+static BYPASS_ROUTES: &[(&[Seg], &[&str])] = {
+    use Seg::{Lit, Param};
+    &[
+        // ---- Reads that must POST to carry a query body ----
+        (&[Param, Lit("_search")], &["POST"]),
+        (&[Param, Lit("_search_partition")], &["POST"]),
+        (&[Param, Lit("_search_history")], &["POST"]),
+        (&[Param, Lit("_search_multi")], &["POST"]),
+        (&[Param, Lit("_search_multi_stream")], &["POST"]),
+        (&[Param, Lit("_search_partition_multi")], &["POST"]),
+        (&[Param, Lit("_search_stream")], &["POST"]),
+        (&[Param, Lit("_values_stream")], &["POST"]),
+        (&[Param, Lit("result_schema")], &["POST"]),
+        (&[Param, Param, Lit("_around")], &["POST"]),
+        // ---- Prometheus read API (POST form-encoded variants) ----
+        (
+            &[
+                Param,
+                Lit("prometheus"),
+                Lit("api"),
+                Lit("v1"),
+                Lit("query"),
+            ],
+            &["POST"],
+        ),
+        (
+            &[
+                Param,
+                Lit("prometheus"),
+                Lit("api"),
+                Lit("v1"),
+                Lit("query_range"),
+            ],
+            &["POST"],
+        ),
+        (
+            &[
+                Param,
+                Lit("prometheus"),
+                Lit("api"),
+                Lit("v1"),
+                Lit("query_exemplars"),
+            ],
+            &["POST"],
+        ),
+        (
+            &[
+                Param,
+                Lit("prometheus"),
+                Lit("api"),
+                Lit("v1"),
+                Lit("series"),
+            ],
+            &["POST"],
+        ),
+        (
+            &[
+                Param,
+                Lit("prometheus"),
+                Lit("api"),
+                Lit("v1"),
+                Lit("labels"),
+            ],
+            &["POST"],
+        ),
+        (
+            &[
+                Param,
+                Lit("prometheus"),
+                Lit("api"),
+                Lit("v1"),
+                Lit("format_query"),
+            ],
+            &["POST"],
+        ),
+        // ---- Previews / validators / exports: compute from the request body
+        // and return a result, persisting nothing ----
+        (&[Param, Lit("functions"), Lit("test")], &["POST"]),
+        (&[Param, Lit("llm"), Lit("models"), Lit("test")], &["POST"]),
+        (&[Param, Lit("sourcemaps"), Lit("stacktrace")], &["POST"]),
+        (
+            &[Param, Lit("alerts"), Lit("templates"), Lit("preview")],
+            &["POST"],
+        ),
+        (
+            &[
+                Param,
+                Lit("alerts"),
+                Lit("deduplication"),
+                Lit("semantic-groups"),
+                Lit("preview-diff"),
+            ],
+            &["POST"],
+        ),
+        // `/v2/{org}/alerts/...` — the `v2` prefix is normalized away before
+        // matching, same as in `ingestion_routes::classify`.
+        (
+            &[Param, Lit("alerts"), Lit("composites"), Lit("validate")],
+            &["POST"],
+        ),
+        (&[Param, Lit("alerts"), Param, Lit("export")], &["POST"]),
+        (&[Param, Lit("alerts"), Lit("generate_sql")], &["POST"]),
+        // ---- Deliberate write exception ----
+        // Creating a short URL is the UI's "share this search" affordance, so a
+        // read-only role has to be able to POST it. Resolving one
+        // (`GET /{org}/short/{id}`) needs no entry — GET is role-allowed.
+        (&[Param, Lit("short")], &["POST"]),
+        // ---- Probe-token routes: the caller is an `o2syn_` synthetics probe,
+        // not a user, so there is no role to check. `validate_credentials`
+        // authenticates the token and the handler re-asserts token org == path
+        // org via `authorize_probe`. Mirrors the enterprise extractor. ----
+        (&[Param, Lit("synthetics"), Lit("jobs"), Param], &["POST"]),
+        (&[Param, Lit("synthetics"), Lit("agent"), Param], &["POST"]),
+        // ---- Cluster diagnostics, mounted outside `/api` ----
+        (&[Lit("node"), Lit("consistent_hash")], &["POST"]),
+    ]
+};
+
+/// Does this request skip the role check in `authz::check_permissions`?
+///
+/// Deliberately **not** covered, despite being reachable via POST:
+/// - `/{org}/mcp` — one JSON-RPC endpoint multiplexing reads *and* writes, so a bypass here would
+///   hand read-only roles the write tools too. MCP has to authorize per tool call instead.
+/// - `/{org}/settings/v2/user/{user_id}` — writes another user's preferences when `user_id` is
+///   spoofed (the handler does no ownership check), so it is scoped to the caller in `validator.rs`
+///   instead of bypassed wholesale.
+/// - `/{org}/alerts/destinations/test` and `.../test_send` — these actually deliver a notification;
+///   "test" does not make them reads.
+#[cfg(not(feature = "enterprise"))]
+pub fn is_permission_bypass(method: &axum::http::Method, path: &str) -> bool {
+    // Ingestion is token-scoped, so it carries its own authorization. Use the
+    // authoritative route table rather than a keyword test.
+    if common::meta::ingestion_routes::is_ingestion_allowed(method, path) {
+        return true;
+    }
+
+    let path = path.strip_prefix('/').unwrap_or(path);
+    // Normalize `/v2/{org}/...` to `/{org}/...`.
+    let path = path
+        .strip_prefix(V2_API_PREFIX)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(path);
+
+    let mut columns: Vec<&str> = path.split('/').collect();
+    // Drop one trailing empty segment so `.../_search/` == `.../_search`.
+    if columns.len() > 1 && columns.last() == Some(&"") {
+        columns.pop();
+    }
+
+    let method = method.as_str();
+    BYPASS_ROUTES.iter().any(|(segs, methods)| {
+        methods.contains(&method)
+            && segs.len() == columns.len()
+            && segs.iter().zip(&columns).all(|(seg, col)| match seg {
+                Seg::Lit(lit) => col == lit,
+                Seg::Param => !col.is_empty(),
+            })
+    })
+}
+
 #[cfg(feature = "enterprise")]
 pub async fn get_user_email_from_auth_str(auth_str: &str) -> Option<String> {
     if auth_str.starts_with("Basic") {
@@ -164,8 +370,8 @@ pub fn get_role(role: &UserOrgRole) -> UserRole {
 }
 
 #[cfg(not(feature = "enterprise"))]
-pub fn get_role(_role: &UserOrgRole) -> UserRole {
-    UserRole::Admin
+pub fn get_role(role: &UserOrgRole) -> UserRole {
+    role.base_role.clone()
 }
 
 fn deserialize_trimmed<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -442,14 +648,30 @@ where
             "".to_string()
         };
 
-        // if let Some(auth_header) = parts.headers.get("Authorization") {
         if !auth_str.is_empty() {
+            let method = parts.method.to_string();
+            let local_path = parts.uri.path().to_string();
+            let cfg = config::get_config();
+            let path = normalize_request_path(&local_path, &cfg.common.base_uri);
+            let path_columns = path.split('/').collect::<Vec<&str>>();
+            let url_len = path_columns.len();
+            let org_id = if url_len > 1 && path_columns[0].eq(V2_API_PREFIX) {
+                path_columns[1].to_string()
+            } else {
+                path_columns[0].to_string()
+            };
+
+            // Decide, per route, whether the role check applies. Everything not
+            // listed as a bypass route gets `bypass_check: false` and is routed
+            // to `check_permissions` for a role-level decision.
+            let bypass_check = is_permission_bypass(&parts.method, path);
+
             return Ok(AuthExtractor {
                 auth: auth_str.to_owned(),
-                method: "".to_string(),
+                method,
                 o2_type: "".to_string(),
-                org_id: "".to_string(),
-                bypass_check: true, // bypass check permissions
+                org_id,
+                bypass_check,
                 parent_id: "".to_string(),
                 use_all_org: false,
                 use_self_context: false,
@@ -973,8 +1195,20 @@ mod tests {
             custom_role: None,
         };
 
-        // In non-enterprise mode, should always return Admin
-        assert_eq!(get_role(&user_role), UserRole::Admin);
+        // In non-enterprise mode, should return the actual base_role
+        assert_eq!(get_role(&user_role), UserRole::User);
+
+        let editor_role = UserOrgRole {
+            base_role: UserRole::Editor,
+            custom_role: None,
+        };
+        assert_eq!(get_role(&editor_role), UserRole::Editor);
+
+        let viewer_role = UserOrgRole {
+            base_role: UserRole::Viewer,
+            custom_role: None,
+        };
+        assert_eq!(get_role(&viewer_role), UserRole::Viewer);
     }
 
     #[cfg(not(feature = "enterprise"))]
@@ -1094,5 +1328,195 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded, ":");
+    }
+
+    #[cfg(not(feature = "enterprise"))]
+    mod permission_bypass {
+        use axum::http::Method;
+
+        use crate::auth::{is_permission_bypass, normalize_request_path};
+
+        fn bypassed(method: Method, path: &str) -> bool {
+            is_permission_bypass(&method, path)
+        }
+
+        #[test]
+        fn reads_that_must_post_are_bypassed() {
+            for path in [
+                "default/_search",
+                "default/_search_partition",
+                "default/_search_history",
+                "default/_search_multi",
+                "default/_search_multi_stream",
+                "default/_search_partition_multi",
+                "default/_search_stream",
+                "default/_values_stream",
+                "default/result_schema",
+                "default/mystream/_around",
+                "default/prometheus/api/v1/query",
+                "default/prometheus/api/v1/query_range",
+                "default/prometheus/api/v1/query_exemplars",
+                "default/prometheus/api/v1/series",
+                "default/prometheus/api/v1/labels",
+                "default/prometheus/api/v1/format_query",
+                "default/functions/test",
+                "default/llm/models/test",
+                "default/sourcemaps/stacktrace",
+                "default/alerts/templates/preview",
+                "default/alerts/deduplication/semantic-groups/preview-diff",
+                "default/short",
+                "node/consistent_hash",
+            ] {
+                assert!(bypassed(Method::POST, path), "expected bypass: POST {path}");
+            }
+        }
+
+        #[test]
+        fn v2_prefix_is_normalized_before_matching() {
+            for path in [
+                "v2/default/alerts/composites/validate",
+                "v2/default/alerts/abc123/export",
+                "v2/default/alerts/generate_sql",
+            ] {
+                assert!(bypassed(Method::POST, path), "expected bypass: POST {path}");
+            }
+        }
+
+        #[test]
+        fn ingestion_is_bypassed_via_the_route_table() {
+            assert!(bypassed(Method::POST, "default/_bulk"));
+            assert!(bypassed(Method::POST, "default/mystream/_json"));
+            assert!(bypassed(Method::POST, "default/prometheus/api/v1/write"));
+        }
+
+        #[test]
+        fn probe_token_routes_are_bypassed() {
+            for path in [
+                "default/synthetics/jobs/resolve",
+                "default/synthetics/jobs/ack",
+                "default/synthetics/jobs/artifact-urls",
+                "default/synthetics/jobs/upload",
+                "default/synthetics/agent/register",
+                "default/synthetics/agent/heartbeat",
+            ] {
+                assert!(bypassed(Method::POST, path), "expected bypass: POST {path}");
+            }
+        }
+
+        /// A bypass entry must not leak onto other verbs of the same shape.
+        #[test]
+        fn bypass_is_scoped_to_post() {
+            for method in [Method::GET, Method::PUT, Method::PATCH, Method::DELETE] {
+                for path in ["default/_search", "default/short", "default/functions/test"] {
+                    assert!(
+                        !bypassed(method.clone(), path),
+                        "{method} {path} must not bypass"
+                    );
+                }
+            }
+        }
+
+        /// Regression for the substring-matching defect class behind
+        /// GHSA-wffq-g8qf-ccmv: a resource merely *named* like a bypass keyword
+        /// used to skip the role check on every verb, so a Viewer could delete
+        /// anything called `short*`, `resources*`, `query_manager*`, ...
+        #[test]
+        fn resource_names_cannot_impersonate_a_bypass_route() {
+            for name in [
+                "short",
+                "shortlog",
+                "resources",
+                "resources_x",
+                "query_manager",
+                "query_manager1",
+                "format_query",
+                "_values_stream",
+                "_around",
+            ] {
+                for tpl in [
+                    "default/streams/{}",
+                    "default/users/{}",
+                    "default/kv/{}",
+                    "default/functions/{}",
+                    "default/alerts/destinations/{}",
+                    "default/pipelines/{}",
+                    "default/dashboards/{}",
+                ] {
+                    let path = tpl.replace("{}", name);
+                    assert!(
+                        !bypassed(Method::DELETE, &path),
+                        "DELETE {path} must not bypass"
+                    );
+                    assert!(!bypassed(Method::PUT, &path), "PUT {path} must not bypass");
+                }
+            }
+        }
+
+        /// Same defect class via the org segment: `query_manager` was tested
+        /// without a leading slash, so an org named after it bypassed the role
+        /// check on *every* endpoint in that org.
+        #[test]
+        fn org_names_cannot_impersonate_a_bypass_route() {
+            for org in ["short", "resources", "query_manager", "format_query"] {
+                for tpl in [
+                    "{}/streams/mystream",
+                    "{}/service_accounts",
+                    "{}/users/a@b.com",
+                    "{}/dashboards/d1",
+                ] {
+                    let path = tpl.replace("{}", org);
+                    assert!(
+                        !bypassed(Method::DELETE, &path),
+                        "DELETE {path} must not bypass"
+                    );
+                    assert!(
+                        !bypassed(Method::POST, &path),
+                        "POST {path} must not bypass"
+                    );
+                }
+            }
+        }
+
+        /// Endpoints deliberately left to the role check — see the doc comment
+        /// on `is_permission_bypass`.
+        #[test]
+        fn mixed_and_side_effecting_posts_are_not_bypassed() {
+            for path in [
+                "default/mcp",
+                "default/settings/v2/user/someone@example.com",
+                "default/alerts/destinations/test",
+                "default/alerts/destinations/slack/test_send",
+                "default/dashboards/d1/panels",
+                "default/service_accounts",
+                "default/enrichment_tables/t1",
+            ] {
+                assert!(!bypassed(Method::POST, path), "POST {path} must not bypass");
+            }
+        }
+
+        #[test]
+        fn trailing_slash_is_tolerated() {
+            assert!(bypassed(Method::POST, "default/_search/"));
+        }
+
+        #[test]
+        fn base_uri_is_stripped_before_the_api_prefix() {
+            // Without stripping `base_uri` first, a non-`/api` route normalizes
+            // with the base-uri segment still attached and its first segment
+            // reads as an org name.
+            assert_eq!(
+                normalize_request_path("/openobserve/node/consistent_hash", "/openobserve"),
+                "node/consistent_hash"
+            );
+            assert_eq!(
+                normalize_request_path("/openobserve/api/default/_search", "/openobserve"),
+                "default/_search"
+            );
+            assert_eq!(
+                normalize_request_path("/api/default/_search", ""),
+                "default/_search"
+            );
+            assert_eq!(normalize_request_path("/node/status", "/"), "node/status");
+        }
     }
 }

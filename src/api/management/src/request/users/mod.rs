@@ -195,10 +195,6 @@ pub async fn save(
             .unwrap();
     }
 
-    #[cfg(not(feature = "enterprise"))]
-    {
-        user.role.base_role = UserRole::Admin;
-    }
     match users::post_user(&org_id, user, &initiator_id).await {
         Ok(resp) => resp,
         Err(e) => MetaHttpResponse::internal_error(e),
@@ -238,9 +234,7 @@ pub async fn update(
     Headers(user_email): Headers<UserEmail>,
     axum::Json(user): axum::Json<UpdateUser>,
 ) -> Response {
-    let email_id = email_id.trim().to_string();
-    #[cfg(not(feature = "enterprise"))]
-    let mut user = user;
+    let email_id = email_id.trim().to_lowercase();
     if user.eq(&UpdateUser::default()) {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -289,13 +283,6 @@ pub async fn update(
             .unwrap();
     }
 
-    #[cfg(not(feature = "enterprise"))]
-    {
-        user.role = Some(UserRoleRequest {
-            role: UserRole::Admin.to_string(),
-            custom: None,
-        });
-    }
     let initiator_id = &user_email.user_id;
     let update_mode = if user_email.user_id.eq(&email_id) {
         UserUpdateMode::SelfUpdate

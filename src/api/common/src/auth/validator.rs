@@ -170,14 +170,11 @@ pub async fn validator(
                 // Check and create organization if needed
                 check_and_create_org(user_id, &req_data.method, path).await?;
 
-                #[cfg(feature = "enterprise")]
                 let path = path.to_owned();
 
-                #[cfg(feature = "enterprise")]
                 if let Some(role) = &res.user_role
                     && role.eq(&UserRole::Viewer)
-                    && req_data.method.eq(&Method::PUT)
-                    && path.ends_with(&format!("users/{}", res.user_email))
+                    && is_viewer_self_scoped(&path, &req_data.method, &res.user_email)
                 {
                     // Viewer should be able to update its own details
                     return Ok(AuthValidationResult {
@@ -243,6 +240,27 @@ async fn blocked_external(user: &config::meta::user::User) -> bool {
             domain_management::evaluate_cached(&user.email).await,
             AccessDecision::Deny
         )
+}
+
+/// Is this request a Viewer acting strictly on its own account?
+///
+/// A Viewer is otherwise read-only, but must still be able to maintain its own
+/// profile and UI preferences. Each arm is pinned to the caller's own email in
+/// the path, so it cannot be turned into a write against another user — which
+/// matters for the settings routes in particular, where the handler itself does
+/// no ownership check on `{user_id}`.
+fn is_viewer_self_scoped(path: &str, method: &Method, user_email: &str) -> bool {
+    match *method {
+        // `PUT /{org}/users/{own_email}` — own profile.
+        Method::PUT => path.ends_with(&format!("users/{user_email}")),
+        // `POST /{org}/settings/v2/user/{own_email}` — set an own preference.
+        Method::POST => path.ends_with(&format!("settings/v2/user/{user_email}")),
+        // `DELETE /{org}/settings/v2/user/{own_email}/{key}` — clear one.
+        Method::DELETE => path.rsplit_once('/').is_some_and(|(prefix, key)| {
+            !key.is_empty() && prefix.ends_with(&format!("settings/v2/user/{user_email}"))
+        }),
+        _ => false,
+    }
 }
 
 pub async fn validate_credentials(
@@ -1279,6 +1297,95 @@ mod tests {
     use openobserve_core::{organization, users};
 
     use super::*;
+
+    mod viewer_self_scope {
+        use axum::http::Method;
+
+        use super::super::is_viewer_self_scoped;
+
+        const ME: &str = "me@example.com";
+
+        #[test]
+        fn own_profile_put_is_self_scoped() {
+            assert!(is_viewer_self_scoped(
+                &format!("default/users/{ME}"),
+                &Method::PUT,
+                ME
+            ));
+        }
+
+        #[test]
+        fn own_preference_write_and_clear_are_self_scoped() {
+            assert!(is_viewer_self_scoped(
+                &format!("default/settings/v2/user/{ME}"),
+                &Method::POST,
+                ME
+            ));
+            assert!(is_viewer_self_scoped(
+                &format!("default/settings/v2/user/{ME}/theme"),
+                &Method::DELETE,
+                ME
+            ));
+        }
+
+        /// The whole point of the email pin: `{user_id}` is attacker-chosen and
+        /// the settings handler does no ownership check of its own.
+        #[test]
+        fn another_users_account_is_not_self_scoped() {
+            let other = "someone@example.com";
+            assert!(!is_viewer_self_scoped(
+                &format!("default/users/{other}"),
+                &Method::PUT,
+                ME
+            ));
+            assert!(!is_viewer_self_scoped(
+                &format!("default/settings/v2/user/{other}"),
+                &Method::POST,
+                ME
+            ));
+            assert!(!is_viewer_self_scoped(
+                &format!("default/settings/v2/user/{other}/theme"),
+                &Method::DELETE,
+                ME
+            ));
+        }
+
+        /// An email is one path segment, so a prefix match must not pass.
+        #[test]
+        fn email_prefix_is_not_self_scoped() {
+            assert!(!is_viewer_self_scoped(
+                "default/users/me@example.com.attacker.test",
+                &Method::PUT,
+                ME
+            ));
+        }
+
+        #[test]
+        fn org_level_settings_are_not_self_scoped() {
+            assert!(!is_viewer_self_scoped(
+                "default/settings/v2",
+                &Method::POST,
+                ME
+            ));
+            assert!(!is_viewer_self_scoped(
+                &format!("default/settings/v2/user/{ME}"),
+                &Method::DELETE,
+                ME
+            ));
+        }
+
+        #[test]
+        fn other_methods_are_never_self_scoped() {
+            for method in [Method::GET, Method::PATCH] {
+                assert!(!is_viewer_self_scoped(
+                    &format!("default/users/{ME}"),
+                    &method,
+                    ME
+                ));
+            }
+        }
+    }
+
     use crate::common::{
         infra::config::{ORG_USERS, USERS},
         meta::user::UserRequest,
